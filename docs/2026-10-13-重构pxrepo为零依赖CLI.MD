@@ -1,7 +1,7 @@
 # 修改方案：按 Pawchive-downloader 范式重构 pxrepo（零依赖 CLI）
 
 > 状态：**待执行**（2026-10-13）
-> 设计决策：①CLI 双兼容（保留原参数语义 + 新增 Pawchive 风格参数）②完全零依赖（只用 Node 内置，代理支持 http(s) 与 SOCKS5）③砍掉 Windows 专属功能 ④配置只用 `.env`，不兼容旧 `config/` ⑤改名范围＝本地目录 + GitHub 仓库都改为 `Pixiv-downloader`，置于最后一步执行 ⑥环境变量前缀保持 `PXREPO_*` 不变 ⑦README 重写：功能流程/用法/版本记录，**大重构后不再保留「源码来自 pxder」的来源声明** ⑧历史策略：旧 pxder 历史（124 提交）转入 `pxder-legacy` 分支，默认分支只保留「重构起点」之后的演进（orphan 根提交 + 分步提交重放）
+> 设计决策：①CLI 双兼容（保留原参数语义 + 新增 Pawchive 风格参数）②完全零依赖（只用 Node 内置，代理支持 http(s) 与 SOCKS5）③砍掉 Windows 专属功能 ④配置只用 `.env`，不兼容旧 `config/` ⑤改名范围＝本地目录 + GitHub 仓库都改为 `Pixiv-downloader`，置于最后一步执行 ⑥环境变量前缀保持 `PXREPO_*` 不变 ⑦README 重写：功能流程/用法/版本记录，**大重构后不再保留「源码来自 pxder」的来源声明** ⑧历史策略：旧 pxder 历史（124 提交）转入 `pxder-legacy` 分支，默认分支只保留「重构起点」之后的演进（orphan 根提交 + 分步提交重放）⑨**分步小提交一律保留，不做压缩/squash**（默认分支的提交历史即开发过程记录）
 > 执行中若方案有修改，针对修改部分重写并整份覆盖入库。
 
 ---
