@@ -93,16 +93,13 @@ function renderIpull(state) {
 }
 
 /**
- * 创建进度跟踪器
- * @param {number} totalFiles 本次任务预计总文件数（百分比分母）
- * @param {boolean} [tty] 是否渲染进度条（默认按 isTty() 判断）
- * @param {string} [style] 样式覆盖（默认读 PXREPO_PROGRESS，再默认 multi）
- * @returns {object} { counts, failedSet, overall, onProgress, onFinish, maybeRender, render, finishLine, style }
+ * 造进度跟踪器的内部状态（把状态与派生逻辑从主工厂里抽出来，保持每个函数短小）
+ * @param {number} totalFiles 预计总文件数
+ * @param {string} style 样式（single|multi|ipull，非法值回退 multi）
  */
-function createProgressTracker(totalFiles, tty = isTty(), style = null) {
-  const chosen = String(style || process.env.PXREPO_PROGRESS || 'multi').toLowerCase();
+function createTrackerState(totalFiles, style) {
   const state = {
-    style: ['single', 'multi', 'ipull'].includes(chosen) ? chosen : 'multi',
+    style: ['single', 'multi', 'ipull'].includes(style) ? style : 'multi',
     totalFiles: Number(totalFiles) || 0,
     counts: { downloaded: 0, existed: 0, failed: 0 },
     active: new Map(), // key（savePath 或文件名）→ { filename, doneBytes, total, percent, speed, state }
@@ -111,14 +108,25 @@ function createProgressTracker(totalFiles, tty = isTty(), style = null) {
     prevLen: 0,
     prevLines: 0,
   };
-
   /** 汇总：已完成数 / 百分比 / 总速度（活动项速度求和） */
   state.overall = () => {
     const done = state.counts.downloaded + state.counts.existed;
     const pct = state.totalFiles ? Math.min(100, (done / state.totalFiles) * 100) : 0;
-    const totalSpeed = [...state.active.values()].reduce((sum, a) => sum + (a.speed || 0), 0);
+    const totalSpeed = [...state.active.values()].reduce((sum, item) => sum + (item.speed || 0), 0);
     return { done, pct, totalSpeed };
   };
+  return state;
+}
+
+/**
+ * 创建进度跟踪器
+ * @param {number} totalFiles 本次任务预计总文件数（百分比分母）
+ * @param {boolean} [tty] 是否渲染进度条（默认按 isTty() 判断）
+ * @param {string} [style] 样式覆盖（默认读 PXREPO_PROGRESS，再默认 multi）
+ * @returns {object} { counts, failedSet, overall, onProgress, onFinish, maybeRender, render, finishLine, style }
+ */
+function createProgressTracker(totalFiles, tty = isTty(), style = null) {
+  const state = createTrackerState(totalFiles, String(style || process.env.PXREPO_PROGRESS || 'multi').toLowerCase());
 
   return {
     counts: state.counts,

@@ -9,10 +9,12 @@
  *
  * 不实现 socks4/socks4a（返回 null，调用方忽略）。
  * 为什么手写：零依赖项目不引入 socks-proxy-agent / https-proxy-agent。
+ *
+ * SOCKS5 握手实现说明：拆成「会话对象 + 三个阶段处理函数」（method/auth/connect），
+ * 每个函数只处理自己那一段报文，避免一个上百行的巨型状态机（可读性与可测性都更好）。
  */
 
 const http = require('node:http');
-const https = require('node:https');
 const tls = require('node:tls');
 const net = require('node:net');
 const { URL } = require('node:url');
@@ -39,6 +41,20 @@ const SOCKS5_REP = Object.freeze({
   0x06: 'TTL 过期',
   0x07: '不支持的命令',
   0x08: '不支持的地址类型',
+});
+
+/** SOCKS5 协议常量（避免满屏裸数字） */
+const SOCKS5 = Object.freeze({
+  VERSION: 0x05,
+  AUTH_VERSION: 0x01,
+  METHOD_NO_AUTH: 0x00,
+  METHOD_USERPASS: 0x02,
+  METHOD_NONE_ACCEPTABLE: 0xff,
+  CMD_CONNECT: 0x01,
+  ATYP_IPV4: 0x01,
+  ATYP_DOMAIN: 0x03,
+  ATYP_IPV6: 0x04,
+  AUTH_OK: 0x00,
 });
 
 /** 解析 HTTPDNS 映射（env 覆盖 > 内置默认） */
@@ -104,110 +120,142 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
+/** 把目标地址编码成 SOCKS5 的 ATYP + ADDR 字段（域名交服务端解析） */
+function encodeTargetAddress(host, port) {
+  let addr;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+    addr = Buffer.concat([Buffer.from([SOCKS5.ATYP_IPV4]), Buffer.from(host.split('.').map(Number))]);
+  } else if (host.includes(':')) {
+    const parts = host.split(':').filter(Boolean);
+    const bytes = Buffer.alloc(16);
+    parts.slice(-8).forEach((seg, idx) => bytes.writeUInt16BE(Number.parseInt(seg, 16) || 0, idx * 2));
+    addr = Buffer.concat([Buffer.from([SOCKS5.ATYP_IPV6]), bytes]);
+  } else {
+    const hostBuf = Buffer.from(host, 'utf8');
+    addr = Buffer.concat([Buffer.from([SOCKS5.ATYP_DOMAIN, hostBuf.length]), hostBuf]);
+  }
+  return Buffer.concat([addr, Buffer.from([(port >> 8) & 0xff, port & 0xff])]);
+}
+
+/** 判断 CONNECT 应答报文总长度（VER+REP+RSV+ATYP + 地址 + PORT） */
+function connectReplyLength(buf) {
+  if (buf.length < 4) return 0;
+  const atyp = buf[3];
+  if (atyp === SOCKS5.ATYP_IPV4) return 4 + 4 + 2;
+  if (atyp === SOCKS5.ATYP_IPV6) return 4 + 16 + 2;
+  if (atyp === SOCKS5.ATYP_DOMAIN) return buf.length < 5 ? 0 : 4 + 1 + buf[4] + 2;
+  return 4 + 2; // 未知类型：至少把固定头读掉，交由 REP 判定失败
+}
+
+/**
+ * 创建一个 SOCKS5 会话（三阶段状态机）
+ * @param {{socket:net.Socket, proxy:object, host:string, port:number, timeoutMs:number,
+ *          onDone:Function, onFail:Function}} opts
+ */
+function createSocks5Session(opts) {
+  const { socket, proxy, host, port, onDone, onFail } = opts;
+  let buf = Buffer.alloc(0);
+  let stage = 'method';
+  let settled = false;
+
+  const fail = (message) => {
+    if (settled) return;
+    settled = true;
+    socket.destroy();
+    onFail(new Error(message));
+  };
+  const done = () => {
+    if (settled) return;
+    settled = true;
+    socket.setTimeout(0);
+    socket.removeAllListeners('data');
+    onDone(socket);
+  };
+
+  /** 阶段一：认证协商 → 选择无认证或用户名密码 */
+  const handleMethod = () => {
+    const method = buf[1];
+    buf = buf.subarray(2);
+    if (method === SOCKS5.METHOD_NONE_ACCEPTABLE) return fail('SOCKS5 服务端不接受任何认证方式');
+    if (method === SOCKS5.METHOD_USERPASS) return sendAuth();
+    return sendConnect(); // 无认证
+  };
+
+  /** 阶段二：用户名密码认证（RFC 1929） */
+  const handleAuth = () => {
+    const status = buf[1];
+    buf = buf.subarray(2);
+    if (status !== SOCKS5.AUTH_OK) return fail(`SOCKS5 认证失败（status=${status}）`);
+    return sendConnect();
+  };
+
+  /** 阶段三：CONNECT 应答（成功即拿到可用 socket） */
+  const handleConnect = () => {
+    const rep = buf[1];
+    const need = connectReplyLength(buf);
+    if (!need || buf.length < need) return undefined;
+    if (rep !== 0x00) return fail(`SOCKS5 连接目标失败（REP=${rep}：${SOCKS5_REP[rep] || '未知'}）`);
+    buf = buf.subarray(need);
+    return done();
+  };
+
+  const handlers = { method: handleMethod, auth: handleAuth, connect: handleConnect };
+
+  /** 发送认证报文 */
+  const sendAuth = () => {
+    if (!proxy.auth) return fail('SOCKS5 服务端要求用户名密码，但代理地址里没提供');
+    const [user, pass] = proxy.auth.split(':');
+    const userBuf = Buffer.from(user || '', 'utf8');
+    const passBuf = Buffer.from(pass || '', 'utf8');
+    socket.write(Buffer.concat([Buffer.from([SOCKS5.AUTH_VERSION, userBuf.length]), userBuf, Buffer.from([passBuf.length]), passBuf]));
+    stage = 'auth';
+    return undefined;
+  };
+
+  /** 发送 CONNECT 请求 */
+  const sendConnect = () => {
+    socket.write(Buffer.concat([Buffer.from([SOCKS5.VERSION, SOCKS5.CMD_CONNECT, 0x00]), encodeTargetAddress(host, port)]));
+    stage = 'connect';
+  };
+
+  return {
+    /** 连接建立后发问候（声明支持的认证方式） */
+    start() {
+      const methods = proxy.auth ? [SOCKS5.METHOD_NO_AUTH, SOCKS5.METHOD_USERPASS] : [SOCKS5.METHOD_NO_AUTH];
+      socket.write(Buffer.from([SOCKS5.VERSION, methods.length, ...methods]));
+    },
+    /** 收到数据：按当前阶段处理；报文不足则等下一片 */
+    feed(chunk) {
+      if (settled) return;
+      buf = Buffer.concat([buf, chunk]);
+      if (buf.length < 2) return;
+      handlers[stage]();
+    },
+    fail,
+  };
+}
+
 /**
  * SOCKS5 握手：返回已连到目标的裸 TCP socket（https 目标需调用方再做 TLS 包装）
- * @param {object} proxy parseProxy 的结果
- * @param {URL} target 目标地址
- * @param {number} timeoutMs 握手超时
  */
 function socks5Connect(proxy, target, timeoutMs) {
   const port = Number(target.port) || (target.protocol === 'https:' ? 443 : 80);
   const host = target.hostname;
   return new Promise((resolve, reject) => {
     const socket = net.connect({ host: proxy.host, port: proxy.port });
-    let buf = Buffer.alloc(0);
-    let stage = 'method';
-    let settled = false;
-
-    const fail = (msg) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      reject(new Error(msg));
-    };
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      socket.setTimeout(0);
-      socket.removeAllListeners('data');
-      resolve(socket);
-    };
-
-    socket.setTimeout(timeoutMs, () => fail(`SOCKS5 握手超时（${proxy.raw}）`));
-    socket.on('error', (err) => fail(`SOCKS5 连接失败 ${proxy.host}:${proxy.port}：${err.code || err.message}`));
-
-    /** 发送 CONNECT 请求（域名/字面 IP 自动选择 ATYP） */
-    const sendConnect = () => {
-      let addr;
-      if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-        addr = Buffer.concat([Buffer.from([0x01]), Buffer.from(host.split('.').map(Number))]);
-      } else if (host.includes(':')) {
-        const parts = host.split(':').filter(Boolean);
-        const bytes = Buffer.alloc(16);
-        parts.slice(-8).forEach((seg, idx) => bytes.writeUInt16BE(Number.parseInt(seg, 16) || 0, idx * 2));
-        addr = Buffer.concat([Buffer.from([0x04]), bytes]);
-      } else {
-        const hostBuf = Buffer.from(host, 'utf8');
-        addr = Buffer.concat([Buffer.from([0x03, hostBuf.length]), hostBuf]); // 域名交服务端解析
-      }
-      const portBuf = Buffer.from([(port >> 8) & 0xff, port & 0xff]);
-      socket.write(Buffer.concat([Buffer.from([0x05, 0x01, 0x00]), addr, portBuf]));
-      stage = 'connect';
-    };
-
-    socket.on('connect', () => {
-      const methods = proxy.auth ? [0x00, 0x02] : [0x00]; // 优先无认证，其次用户名密码
-      socket.write(Buffer.from([0x05, methods.length, ...methods]));
+    const session = createSocks5Session({
+      socket,
+      proxy,
+      host,
+      port,
+      timeoutMs,
+      onDone: resolve,
+      onFail: reject,
     });
-
-    socket.on('data', (chunk) => {
-      buf = Buffer.concat([buf, chunk]);
-
-      if (stage === 'method') {
-        if (buf.length < 2) return;
-        const method = buf[1];
-        buf = buf.subarray(2);
-        if (method === 0xff) return fail('SOCKS5 服务端不接受任何认证方式');
-        if (method === 0x02) {
-          if (!proxy.auth) return fail('SOCKS5 服务端要求用户名密码，但代理地址里没提供');
-          const [user, pass] = proxy.auth.split(':');
-          const userBuf = Buffer.from(user || '', 'utf8');
-          const passBuf = Buffer.from(pass || '', 'utf8');
-          socket.write(Buffer.concat([Buffer.from([0x01, userBuf.length]), userBuf, Buffer.from([passBuf.length]), passBuf]));
-          stage = 'auth';
-          return;
-        }
-        sendConnect(); // 0x00 无认证
-        return;
-      }
-
-      if (stage === 'auth') {
-        if (buf.length < 2) return;
-        const status = buf[1];
-        buf = buf.subarray(2);
-        if (status !== 0x00) return fail(`SOCKS5 认证失败（status=${status}）`);
-        sendConnect();
-        return;
-      }
-
-      if (stage === 'connect') {
-        if (buf.length < 4) return;
-        const rep = buf[1];
-        const atyp = buf[3];
-        let need = 4; // VER + REP + RSV + ATYP
-        if (atyp === 0x01) need += 4;
-        else if (atyp === 0x04) need += 16;
-        else if (atyp === 0x03) {
-          if (buf.length < 5) return;
-          need += 1 + buf[4];
-        }
-        need += 2; // BND.PORT
-        if (buf.length < need) return;
-        if (rep !== 0x00) return fail(`SOCKS5 连接目标失败（REP=${rep}：${SOCKS5_REP[rep] || '未知'}）`);
-        buf = buf.subarray(need);
-        done();
-      }
-    });
+    socket.setTimeout(timeoutMs, () => session.fail(`SOCKS5 握手超时（${proxy.raw}）`));
+    socket.on('error', (err) => session.fail(`SOCKS5 连接失败 ${proxy.host}:${proxy.port}：${err.code || err.message}`));
+    socket.on('connect', () => session.start());
+    socket.on('data', (chunk) => session.feed(chunk));
   });
 }
 
@@ -262,10 +310,13 @@ async function wrapTls(socket, url, timeoutMs) {
 module.exports = {
   DEFAULT_HOSTS,
   SOCKS5_REP,
+  SOCKS5,
   resolveHosts,
   pickProxy,
   parseProxy,
   socks5Connect,
+  createSocks5Session,
+  encodeTargetAddress,
   createRawSocket,
   wrapTls,
   withTimeout,

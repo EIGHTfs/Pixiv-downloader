@@ -11,6 +11,9 @@
  *   - 进度上报：把字节进度回调给进度条（src/util/progress.js）
  *   - dryrun：只产出计划，不发请求、不落盘
  *
+ * 结构：`downloadOne` 只做流程编排，细节拆成四个小函数——
+ *   resolveResumeOffset（断点判定）/ buildRequestHeaders（请求头）/ streamToTmp（写盘+进度）/ commitDownload（校验+落盘）
+ *
  * 与旧实现的差别（旧代码问题见方案「18 项缺陷清单」）：
  *   - 不再用 content-length 与 statSync().size 做宽松相等比较（字符串 vs 数字）
  *   - 不再「下载失败静默丢弃」，失败项统一进 failedList 并保留续传基础
@@ -24,6 +27,8 @@ const { pipeline } = require('node:stream/promises');
 const { acquireLock } = require('../util/lock.js');
 
 const HTML_SNIFF = /^\s*(<!doctype html|<html|<\?xml|<head)/i; // 反爬/错误页特征（正常图片不会以这些开头）
+const SNIFF_BYTES = 256;   // 嗅探头部字节数
+const REASON_MAX_CHARS = 120; // 失败原因截断长度（日志可读性）
 
 /** 速度计：按 1 秒滑动窗口估算瞬时速度（字节/秒） */
 function createSpeedMeter() {
@@ -59,7 +64,7 @@ function isAlreadyDone(savePath, expectSize) {
 }
 
 /** 读取文件头部若干字节（用于 HTML 嗅探） */
-function sniffHead(file, bytes = 256) {
+function sniffHead(file, bytes = SNIFF_BYTES) {
   try {
     const fd = fs.openSync(file, 'r');
     const buf = Buffer.alloc(bytes);
@@ -69,6 +74,119 @@ function sniffHead(file, bytes = 256) {
   } catch {
     return '';
   }
+}
+
+/**
+ * 断点判定：返回续传起点（0 = 从头写）
+ * 若 .tmp 比预期还大（脏数据），顺手截断为 0，避免拼出坏文件
+ */
+function resolveResumeOffset(tmpPath, expectSize) {
+  if (!fs.existsSync(tmpPath)) return 0;
+  const tmpSize = fs.statSync(tmpPath).size;
+  const oversize = Number.isFinite(expectSize) && expectSize > 0 && tmpSize > expectSize;
+  if (oversize) {
+    fs.truncateSync(tmpPath, 0);
+    return 0;
+  }
+  return tmpSize;
+}
+
+/** 组装请求头：图片 CDN 需要 Referer；有断点时带 Range */
+function buildRequestHeaders(task, resumeFrom) {
+  const headers = {};
+  if (task.referer) headers.Referer = task.referer;
+  if (resumeFrom > 0) headers.Range = `bytes=${resumeFrom}-`;
+  return headers;
+}
+
+/**
+ * 把响应流写入 .tmp，并上报进度
+ * @returns {Promise<number>} 落盘后的总字节数
+ */
+async function streamToTmp({ res, tmpPath, append, resumeFrom, expectSize, label, savePath, tracker }) {
+  let written = resumeFrom;
+  const declared = Number(res.headers['content-length']);
+  const total = Number.isFinite(expectSize) && expectSize > 0
+    ? expectSize
+    : (declared > 0 ? resumeFrom + declared : null);
+  const meter = createSpeedMeter();
+
+  // 用 Transform 计数（而不是给 res 挂 data 监听——那会与 pipeline 抢流）
+  const counter = new Transform({
+    transform(chunk, _enc, cb) {
+      written += chunk.length;
+      if (tracker) {
+        tracker.onProgress({
+          filename: label,
+          savePath,
+          doneBytes: written,
+          total,
+          percent: total ? Math.min(100, (written / total) * 100) : 0,
+          speed: meter.add(chunk.length),
+          state: 'download',
+        });
+      }
+      cb(null, chunk);
+    },
+  });
+  await pipeline(res.res, counter, fs.createWriteStream(tmpPath, { flags: append ? 'a' : 'w' }));
+  return fs.statSync(tmpPath).size;
+}
+
+/**
+ * 校验并落盘
+ * @returns {{status:'downloaded'|'failed', reason?:string, bytes:number}}
+ */
+function commitDownload({ tmpPath, savePath, expectSize }) {
+  const finalSize = fs.statSync(tmpPath).size;
+
+  // 1) HTML 反爬页识别（旧实现会把 403/404 页面当图片存下来）
+  const head = sniffHead(tmpPath);
+  if (HTML_SNIFF.test(head)) {
+    const badPath = `${tmpPath}.bad`;
+    try { fs.renameSync(tmpPath, badPath); } catch { /* 改名失败不影响判定 */ }
+    return { status: 'failed', bytes: finalSize, reason: `响应是网页而非文件（已留档 ${path.basename(badPath)}）` };
+  }
+
+  // 2) 大小校验：严格数字比较（旧实现用字符串 == 数字）
+  if (Number.isFinite(expectSize) && expectSize > 0 && finalSize !== expectSize) {
+    return { status: 'failed', bytes: finalSize, reason: `大小不符（期望 ${expectSize}，实际 ${finalSize}），已保留 .tmp 供续传` };
+  }
+  if (finalSize === 0) {
+    return { status: 'failed', bytes: 0, reason: '下载到 0 字节' };
+  }
+
+  // 3) 原子落盘
+  fs.renameSync(tmpPath, savePath);
+  return { status: 'downloaded', bytes: finalSize };
+}
+
+/** 统一收尾：记进度 + 返回结果 */
+function finish(tracker, label, status, payload = {}) {
+  if (tracker) tracker.onFinish(label, status === 'downloaded' || status === 'existed' ? status : 'failed');
+  return { status, bytes: 0, ...payload };
+}
+
+/**
+ * 处理非 2xx 响应（404/403/416/其它）
+ * @returns {{status:string, bytes:number, reason?:string}}
+ */
+function handleErrorStatus({ status, tmpPath, savePath, expectSize, label, tracker }) {
+  if (status === 404 || status === 410) {
+    return finish(tracker, label, 'failed', { reason: `HTTP ${status}（作品可能已删除）` });
+  }
+  if (status === 416) {
+    // 请求范围不可满足：.tmp 已不小于目标长度 → 按大小判定能否直接落盘，否则重置
+    const size = fs.existsSync(tmpPath) ? fs.statSync(tmpPath).size : 0;
+    if (Number.isFinite(expectSize) && size === expectSize) {
+      fs.renameSync(tmpPath, savePath);
+      if (tracker) tracker.onFinish(label, 'downloaded');
+      return { status: 'downloaded', bytes: size };
+    }
+    if (fs.existsSync(tmpPath)) fs.truncateSync(tmpPath, 0);
+    return finish(tracker, label, 'failed', { reason: 'HTTP 416（断点数据与目标不一致，已重置 .tmp）' });
+  }
+  return finish(tracker, label, 'failed', { reason: `HTTP ${status}` });
 }
 
 /**
@@ -88,8 +206,7 @@ async function downloadOne(task, ctx) {
 
   // 1) 已完成 → 跳过（不浪费一次请求）
   if (isAlreadyDone(task.savePath, task.expectSize)) {
-    if (tracker) tracker.onFinish(label, 'existed');
-    return { status: 'existed', bytes: 0 };
+    return finish(tracker, label, 'existed');
   }
 
   // 2) 跨进程锁（可选）：同一文件被别的进程下载中则跳过
@@ -97,125 +214,43 @@ async function downloadOne(task, ctx) {
   if (lockDir) {
     lock = acquireLock(task.savePath, lockDir);
     if (!lock) {
-      if (tracker) tracker.onFinish(label, 'existed'); // 别处在下 → 对本进程等价于「已处理」
       if (onEvent) onEvent({ type: 'locked', label });
-      return { status: 'locked', bytes: 0 };
+      return finish(tracker, label, 'existed'); // 别处在下 → 对本进程等价于「已处理」
     }
   }
 
   const tmpPath = `${task.savePath}.tmp`;
-  const meter = createSpeedMeter();
-  let resumeFrom = 0;
-
   try {
     fs.mkdirSync(path.dirname(task.savePath), { recursive: true });
+    const resumeFrom = resolveResumeOffset(tmpPath, task.expectSize);
+    const res = await http.stream(task.url, {
+      headers: buildRequestHeaders(task, resumeFrom),
+      timeoutMs: ctx.timeoutMs,
+    });
 
-    // 3) 断点：已有 .tmp 且小于预期大小 → 从断点续传
-    if (fs.existsSync(tmpPath)) {
-      const tmpSize = fs.statSync(tmpPath).size;
-      const oversize = Number.isFinite(task.expectSize) && task.expectSize > 0 && tmpSize > task.expectSize;
-      resumeFrom = oversize ? 0 : tmpSize;
-      if (oversize) fs.truncateSync(tmpPath, 0); // 比目标还大说明是脏数据，从头写
-    }
-
-    const headers = {};
-    if (task.referer) headers.Referer = task.referer;
-    if (resumeFrom > 0) headers.Range = `bytes=${resumeFrom}-`;
-
-    const res = await http.stream(task.url, { headers, timeoutMs: ctx.timeoutMs });
-
-    // 4) 状态处理
-    if (res.status === 404 || res.status === 410) {
-      if (tracker) tracker.onFinish(label, 'failed');
-      return { status: 'failed', bytes: 0, reason: `HTTP ${res.status}（作品可能已删除）` };
-    }
-    if (res.status === 403) {
-      // 实测：i.pximg.net 缺 Referer 就是 403（不是权限问题），这里给出可操作的提示
-      if (tracker) tracker.onFinish(label, 'failed');
-      return {
-        status: 'failed',
-        bytes: 0,
-        reason: task.referer ? 'HTTP 403（Referer 被拒绝）' : 'HTTP 403（图片 CDN 需要 Referer，任务未带 referer）',
-      };
-    }
-    if (res.status === 416) {
-      // 请求范围不可满足：说明 .tmp 已不小于目标长度 → 按大小判定能否直接落盘
-      const size = fs.statSync(tmpPath).size;
-      if (Number.isFinite(task.expectSize) && size === task.expectSize) {
-        fs.renameSync(tmpPath, task.savePath);
-        if (tracker) tracker.onFinish(label, 'downloaded');
-        return { status: 'downloaded', bytes: size };
-      }
-      fs.truncateSync(tmpPath, 0); // 数据不可信，重来
-      resumeFrom = 0;
-      if (tracker) tracker.onFinish(label, 'failed');
-      return { status: 'failed', bytes: 0, reason: 'HTTP 416（断点数据与目标不一致，已重置 .tmp）' };
-    }
     if (res.status !== 200 && res.status !== 206) {
-      if (tracker) tracker.onFinish(label, 'failed');
-      return { status: 'failed', bytes: 0, reason: `HTTP ${res.status}` };
+      return handleErrorStatus({ status: res.status, tmpPath, savePath: task.savePath, expectSize: task.expectSize, label, tracker });
     }
 
     // 服务器忽略 Range（返回 200）→ 必须从头写，否则会拼出坏文件
     const append = res.status === 206 && resumeFrom > 0;
-    if (!append) {
-      resumeFrom = 0;
-      if (fs.existsSync(tmpPath)) fs.truncateSync(tmpPath, 0); // 文件可能还不存在（首次下载），先判存在
-    }
+    if (!append && fs.existsSync(tmpPath)) fs.truncateSync(tmpPath, 0);
 
-    // 5) 写盘 + 进度上报（Transform 计数，避免与 pipeline 抢流）
-    let written = resumeFrom;
-    const total = Number.isFinite(task.expectSize) && task.expectSize > 0
-      ? task.expectSize
-      : (Number(res.headers['content-length']) > 0 ? resumeFrom + Number(res.headers['content-length']) : null);
-    const counter = new Transform({
-      transform(chunk, _enc, cb) {
-        written += chunk.length;
-        if (tracker) {
-          const speed = meter.add(chunk.length);
-          tracker.onProgress({
-            filename: label,
-            savePath: task.savePath,
-            doneBytes: written,
-            total,
-            percent: total ? Math.min(100, (written / total) * 100) : 0,
-            speed,
-            state: 'download',
-          });
-        }
-        cb(null, chunk);
-      },
+    const written = await streamToTmp({
+      res,
+      tmpPath,
+      append,
+      resumeFrom: append ? resumeFrom : 0,
+      expectSize: task.expectSize,
+      label,
+      savePath: task.savePath,
+      tracker,
     });
-    await pipeline(res.res, counter, fs.createWriteStream(tmpPath, { flags: append ? 'a' : 'w' }));
-
-    const finalSize = fs.statSync(tmpPath).size;
-
-    // 6) HTML 反爬页识别（旧实现会把 403/404 页面当图片存下来）
-    const head = sniffHead(tmpPath);
-    if (HTML_SNIFF.test(head)) {
-      const badPath = `${tmpPath}.bad`;
-      try { fs.renameSync(tmpPath, badPath); } catch { /* 改名失败也不影响判定 */ }
-      if (tracker) tracker.onFinish(label, 'failed');
-      return { status: 'failed', bytes: finalSize, reason: `响应是网页而非文件（已留档 ${path.basename(badPath)}）` };
-    }
-
-    // 7) 大小校验：严格数字比较（旧实现用字符串 == 数字）
-    if (Number.isFinite(task.expectSize) && task.expectSize > 0 && finalSize !== task.expectSize) {
-      if (tracker) tracker.onFinish(label, 'failed');
-      return { status: 'failed', bytes: finalSize, reason: `大小不符（期望 ${task.expectSize}，实际 ${finalSize}），已保留 .tmp 供续传` };
-    }
-    if (finalSize === 0) {
-      if (tracker) tracker.onFinish(label, 'failed');
-      return { status: 'failed', bytes: 0, reason: '下载到 0 字节' };
-    }
-
-    // 8) 原子落盘
-    fs.renameSync(tmpPath, task.savePath);
-    if (tracker) tracker.onFinish(label, 'downloaded');
-    return { status: 'downloaded', bytes: finalSize };
+    const committed = commitDownload({ tmpPath, savePath: task.savePath, expectSize: task.expectSize });
+    if (tracker) tracker.onFinish(label, committed.status === 'downloaded' ? 'downloaded' : 'failed');
+    return { ...committed, bytes: committed.bytes || written };
   } catch (err) {
-    if (tracker) tracker.onFinish(label, 'failed');
-    return { status: 'failed', bytes: 0, reason: String(err && err.message || err).slice(0, 120) };
+    return finish(tracker, label, 'failed', { reason: String(err && err.message || err).slice(0, REASON_MAX_CHARS) });
   } finally {
     if (lock) lock.release();
   }
@@ -263,6 +298,9 @@ module.exports = {
   downloadOne,
   runPool,
   isAlreadyDone,
+  resolveResumeOffset,
+  buildRequestHeaders,
+  commitDownload,
   createSpeedMeter,
   HTML_SNIFF,
 };
