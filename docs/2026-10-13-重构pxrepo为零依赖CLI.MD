@@ -82,7 +82,10 @@
 
 | 文件 | 操作 | 行数预估 | 功能描述 | 依赖关系 |
 |---|---|---|---|---|
-| `cli.js` | 新增 | +450 | 参数解析 + 命令编排 | 依赖 `src/**` |
+| `cli.js` | 新增 | ~200 | 入口：参数解析（双兼容 + `--key=value`）+ 命令分发 + 帮助/版本 | 依赖 `src/cli/*` |
+| `src/cli/context.js` | 新增 | ~130 | 上下文装配（配置→HTTP→客户端→存储→进度条工厂）、.env 读写、登录/目录断言 | 被 cli 调用 |
+| `src/cli/fetch.js` | 新增 | ~180 | 分页拉取（关注/作品/收藏）+ 公共下载编排（黑名单过滤→建目录→拉作品→规划→下载→记历史） | 依赖 download/* |
+| `src/cli/commands.js` | 新增 | ~330 | 11 个命令实现（login/logout/-G/-B/-u/-p/-U/-l/-d/-D/--setting） | 依赖 context/fetch |
 | `src/config.js` | 新增 | ~230 | `.env` 读取 + 默认值 + 类型转换 + 校验 + `stateDir`（**不读旧 `config/`**） | 被 cli/download 调用 |
 | `src/net/http.js` | 新增 | ~250 | 请求层：超时 / 重试退避 / 429 / Retry-After / 解压 / 连接分派 | 依赖 proxy、limiter |
 | `src/net/proxy.js` | 新增 | ~280 | 代理解析 + CONNECT 隧道 + **零依赖 SOCKS5 握手** + HTTPDNS 映射 | 被 http 调用 |
@@ -112,6 +115,10 @@
 Pixiv-downloader/
 ├── cli.js                     # 唯一入口：参数解析 + 命令分发（薄）
 ├── src/
+│   ├── cli/                   # 编排层
+│   │   ├── context.js         # 上下文装配 + .env 读写 + 断言
+│   │   ├── fetch.js           # 分页拉取 + 公共下载编排
+│   │   └── commands.js        # 各命令实现
 │   ├── config.js              # 配置（.env / 默认值 / 校验 / stateDir）
 │   ├── net/
 │   │   ├── http.js            # 请求层（超时 / 重试 / 解压 / 连接分派）
@@ -280,6 +287,7 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | 目录架构重组：扁平 `lib/` → 分层 `src/`（net/pixiv/download/store/util），`http.js` 513 行拆为 http/proxy/limiter；全部 `git mv` 保历史，回归 20+14+10+9 全 PASS | — |
 | 2026-10-13 | Step 6 完成（下载引擎）：`src/download/{engine,plan,ugoira}.js` + `src/util/lock.js`；`test/download-engine-check.mjs` **13 PASS**（本地 HTTP 服务器验证续传/忽略 Range/416/大小不符/HTML 反爬/404/并发上限/dryrun）、`test/download-plan-check.mjs` **11 PASS** | — |
 | 2026-10-13 | 测试抓到真 bug：`illustToTasks(null)` 抛 TypeError（漏空值守卫）→ 已修（返回空数组并跳过无 id 条目） | 待固化：纯函数入口必须做输入守卫 |
+| 2026-10-13 | Step 7 完成（CLI 编排层）：`cli.js`（参数解析双兼容 + 分发 + 帮助/版本，VERSION=5.0.0）+ `src/cli/{context,fetch,commands}.js`（上下文装配 / 分页拉取与公共下载编排 / 11 个命令）；`test/cli-args-check.mjs` **18 PASS**；CLI 冒烟：`--version`/`--setting` 正常，未登录退出码 1、帮助 0、无命令 2 | 待固化：可选值参数的「吃不吃下一个 token」判定规则 |
 | 2026-10-13 | Step 4 完成（`lib/names.js` 命名净化 + `lib/store.js` JSON 原子读写），`test/store-names-check.mjs` **20 PASS**（含「损坏文件改名留档不删」「store 模块无删除类 API」两条针对旧 bug 的断言）；`config.js` 增 `stateDir`（PXREPO_STATE_DIR，默认数据根下 `.pxrepo`）| 待固化：状态文件三条纪律（不用 require 读可变 JSON / 绝不删用户文件 / 原子写） |
 
 ---
