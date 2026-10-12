@@ -1,7 +1,7 @@
 # 修改方案：按 Pawchive-downloader 范式重构 pxrepo（零依赖 CLI）
 
 > 状态：**待执行**（2026-10-13）
-> 设计决策：①CLI 双兼容（保留原参数语义 + 新增 Pawchive 风格参数）②完全零依赖（只用 Node 内置，代理仅 http(s)）③砍掉 Windows 专属功能 ④配置只用 `.env`，不兼容旧 `config/`
+> 设计决策：①CLI 双兼容（保留原参数语义 + 新增 Pawchive 风格参数）②完全零依赖（只用 Node 内置，代理仅 http(s)）③砍掉 Windows 专属功能 ④配置只用 `.env`，不兼容旧 `config/` ⑤改名范围＝本地目录 + GitHub 仓库都改为 `Pixiv-downloader`，置于最后一步执行 ⑥环境变量前缀保持 `PXREPO_*` 不变 ⑦README 重写：功能流程/用法/版本记录，**大重构后不再保留「源码来自 pxder」的来源声明**
 > 执行中若方案有修改，针对修改部分重写并整份覆盖入库。
 
 ---
@@ -73,7 +73,8 @@
 **学习结论**
 1. 复用：零依赖单引擎 + `lib/` 模块化、自有参数解析、模块级进度条渲染、`.tmp` 断点、原子写、相对路径测试脚本。
 2. 不用：npm 依赖、`global` 状态、`require` 读可变 JSON、双实现、`fs-extra` 的隐式行为。
-3. 无可用 skill 覆盖的部分（Pixiv 鉴权 header 细节）按第一性原理实现，并**用已知值对拍验证**（`md5(time + HASH_SECRET)` 用固定输入比对）。
+3. 无可用 skill 覆盖的部分（Pixiv 鉴权 header 细节）按第一性原理实现，并**用已知值对拍验证**。
+4. **零依赖 ≠ 自己造轮子**：Node 内置能力先查一遍再决定是否自写——`node:crypto` 已提供 `md5`/`sha256`（实测 `md5('abc')` = `900150983cd24fb0d6963f7d28e17f72`，Node v22.23.3），因此**不需要**自写 `lib/md5.js`（原 Step 2 取消）；同理 `zlib`（ugoira/压缩）、`readline`（交互）、`https`（请求）都用内置。
 
 ---
 
@@ -89,7 +90,6 @@
 | `lib/progress.js` | 移植 | ±130 | 三样式进度条（single/multi/ipull） | 被 cli/download 调用 |
 | `lib/store.js` | 新增 | +80 | JSON 原子读写（blacklist/download/history） | 被 cli/download 调用 |
 | `lib/names.js` | 新增 | +60 | 画师目录名/文件名净化（去摊位后缀 + 非法字符） | 被 download 调用 |
-| `lib/md5.js` | 新增 | +80 | 纯 JS md5（替换 blueimp-md5） | 被 pixiv 调用 |
 | `test/*.mjs` | 新增 | +400 | 零依赖断言脚本 | 依赖 lib |
 | `docs/2026-10-13-重构pxrepo为零依赖CLI.MD` | 新增 | — | 本方案 | 无 |
 | `README.md` | 重写 | — | 功能流程 + 用法 + 版本记录 | 无 |
@@ -111,8 +111,7 @@ pxrepo/
 │   ├── download.js        # 下载引擎
 │   ├── progress.js        # 进度条三样式
 │   ├── store.js           # JSON 原子读写
-│   ├── names.js           # 命名净化
-│   └── md5.js             # 纯 JS md5
+│   └── names.js           # 命名净化
 ├── test/                  # 零依赖测试脚本
 ├── docs/                  # 方案与调查
 ├── .env / env.example     # 配置（.env 不入库）
@@ -205,17 +204,16 @@ PKCE：code_verifier = base64url(randomBytes(32))
 
 ## 七、任务看板（从简到难，每步本地小提交）
 
-- [ ] **Step 1** `lib/config.js` + `.env`/`env.example`：解析 `.env`、默认值、缺 `PXREPO_DATA_ROOT` 明确报错
-- [ ] **Step 2** `lib/md5.js`：纯 JS md5，与已知向量对拍
-- [ ] **Step 3** `lib/http.js`：`https.request` 封装 + 超时 + 重试退避 + 429 退避 + http(s) 代理
-- [ ] **Step 4** `lib/pixiv.js`：PKCE 登录、refresh token、userFollowing/userIllusts/illustDetail/ugoiraMetadata/bookmark
-- [ ] **Step 5** `lib/names.js` + `lib/store.js`：命名净化 + JSON 原子读写（**不删用户文件**）
-- [ ] **Step 6** `lib/progress.js`：移植三样式进度条
-- [ ] **Step 7** `lib/download.js`：并发 + `.tmp` 断点 + TPS 门控 + 校验 + ugoira
-- [ ] **Step 8** `cli.js`：参数解析（双兼容）+ 全部子命令编排 + `--dryrun`
-- [ ] **Step 9** 收口：旧实现与 npm 清单移入 `.trash/`，确认无 `node_modules`
-- [ ] **Step 10** `test/` 零依赖脚本 + 小样本实测（dryrun 先行）
-- [ ] **Step 11** README 重写（功能流程/用法/版本记录）+ 经验固化 + 整理成一次提交推送
+- [x] **Step 1** `lib/config.js` + `.env`/`env.example`：解析 `.env`、默认值、缺 `PXREPO_DATA_ROOT` 明确报错 —— **完成**（提交 `bf6224d`）
+- [ ] **Step 2** `lib/http.js`：`https.request` 封装 + 超时 + 重试退避 + 429 退避 + http(s) 代理
+- [ ] **Step 3** `lib/pixiv.js`：PKCE 登录、refresh token、userFollowing/userIllusts/illustDetail/ugoiraMetadata/bookmark（md5 用内置 `node:crypto`）
+- [ ] **Step 4** `lib/names.js` + `lib/store.js`：命名净化 + JSON 原子读写（**不删用户文件**）
+- [ ] **Step 5** `lib/progress.js`：移植三样式进度条
+- [ ] **Step 6** `lib/download.js`：并发 + `.tmp` 断点 + TPS 门控 + 校验 + ugoira
+- [ ] **Step 7** `cli.js`：参数解析（双兼容）+ 全部子命令编排 + `--dryrun`
+- [ ] **Step 8** 收口：旧实现与 npm 清单移入 `.trash/`，确认无 `node_modules`
+- [ ] **Step 9** `test/` 零依赖脚本 + 小样本实测（dryrun 先行）
+- [ ] **Step 10** README 重写（功能流程/用法/版本记录）+ 经验固化 + **改名 `Pixiv-downloader`（本地目录 + GitHub 仓库）** + 整理成一次提交推送
 
 ---
 
@@ -252,6 +250,12 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 日期 | 事件 | 固化到 |
 |---|---|---|
 | 2026-10-13 | 方案定稿并入库（4 项设计决策） | — |
+| 2026-10-13 | 补充决策⑤改名范围、⑥前缀保持 `PXREPO_*` | — |
+| 2026-10-13 | Step 1 配置层完成（`lib/config.js` + `env.example` + `.env` + `.gitignore`），提交 `bf6224d` | — |
+| 2026-10-13 | 方案简化：`node:crypto` 已内置 md5/sha256（实测对拍通过）→ 取消原 Step 2「自写 lib/md5.js」，后续步骤顺延 | `zero-dep-nodejs-no-packagejson`（零依赖≠自造轮子，先查内置能力） |
+| 2026-10-13 | Step 2 网络层完成（`lib/http.js`），并新增 `test/http-proxy-check.mjs` 本地 CONNECT 代理自检 **6/6 PASS**（区分「代理全死」与「实现有 bug」的关键工具） | 待固化：测试用本地代理自证链路 |
+| 2026-10-13 | 网络侦察结论：本机 DNS 被污染（`app-api.pixiv.net`→`199.59.149.202`）、直连与 DoH 均不通；http 代理 139 个全部失效；**SOCKS5 公开代理可用**。端到端验证：`i.pximg.net` 无 Referer=403 / 带 Referer=404（真 Pixiv 行为），经代理下载原图 5,193,599 字节 JPEG（FFD8FF 起、FFD9 止）完整 | — |
+| 2026-10-13 | 方案扩展（待确认）：可用代理均为 SOCKS5，而决策②限定 http(s) 代理 → 拟给 `lib/http.js` 增加零依赖 SOCKS5（手写握手，no-auth/用户名密码），仍不引入任何 npm 依赖 | — |
 
 ---
 
