@@ -1,4 +1,16 @@
 
+# 配置与凭据（.env 含 refresh_token，绝不入库）
+.env
+
+# 运行时目录（跨进程锁 / 断点临时文件元数据）
+.pxrepo/
+
+# 下载暂存（旧实现的未完成下载目录）
+inComplete/
+
+# 安全删除回收站（被替换/废弃的文件移到这里，可恢复）
+.trash/
+
 config/download.json
 config/history.json
 config/config.json
