@@ -256,6 +256,9 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | Step 2 网络层完成（`lib/http.js`），并新增 `test/http-proxy-check.mjs` 本地 CONNECT 代理自检 **6/6 PASS**（区分「代理全死」与「实现有 bug」的关键工具） | 待固化：测试用本地代理自证链路 |
 | 2026-10-13 | 网络侦察结论：本机 DNS 被污染（`app-api.pixiv.net`→`199.59.149.202`）、直连与 DoH 均不通；http 代理 139 个全部失效；**SOCKS5 公开代理可用**。端到端验证：`i.pximg.net` 无 Referer=403 / 带 Referer=404（真 Pixiv 行为），经代理下载原图 5,193,599 字节 JPEG（FFD8FF 起、FFD9 止）完整 | — |
 | 2026-10-13 | 方案扩展（待确认）：可用代理均为 SOCKS5，而决策②限定 http(s) 代理 → 拟给 `lib/http.js` 增加零依赖 SOCKS5（手写握手，no-auth/用户名密码），仍不引入任何 npm 依赖 | — |
+| 2026-10-13 | 方案扩展已确认并落地：`lib/http.js` 增加零依赖 SOCKS5（手写 RFC1928/1929），`test/http-proxy-check.mjs` 本地 CONNECT+SOCKS5 自检 **10/10 PASS**；`test/live-pixiv-check.mjs` 真实链路 **8/8 PASS**（公开 ajax 取原图地址 → 经代理下载 → 与 curl 参考图 SHA256 逐字节一致） | 待固化：用本地代理自证链路（区分「代理全死」与「实现有 bug」） |
+| 2026-10-13 | Step 3 完成（`lib/pixiv.js`：PKCE 登录 / refresh token / 关注 / 画师作品 / 收藏 / 作品详情 / 动图元数据 / 分页），`test/pixiv-api-check.mjs` **10 PASS**（含在线：未鉴权请求被 Pixiv 拒绝且错误信息正确解析） | — |
+| 2026-10-13 | 实测发现：Pixiv 对「缺 Authorization」的业务请求返回 **400**（不是 401），错误信息为 `Error occurred at the OAuth process. Please check your Authorization header.` → 断言改为 400/401 双接受 | 待固化：第三方 API 的错误码不能凭直觉假设 |
 
 ---
 
