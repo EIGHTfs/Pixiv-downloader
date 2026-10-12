@@ -89,8 +89,10 @@
 | `src/net/limiter.js` | 新增 | ~40 | 令牌桶 TPS 限速 + sleep | 被 http 调用 |
 | `src/pixiv/auth.js` | 新增 | ~170 | 协议常量 / 伪装请求头 / `X-Client-Hash` / PKCE / token 交换与刷新 | 被 client 调用 |
 | `src/pixiv/client.js` | 新增 | ~180 | API 端点封装 + 错误解析 + 401 自动刷新重试 | 依赖 auth |
-| `src/download/engine.js` | 新增 | +260 | 并发队列 + `.tmp` 断点 + TPS 门控 + 大小校验 | 依赖 http/store/progress |
-| `src/download/ugoira.js` | 新增 | +80 | 动图（zip 命名与校验） | 被 engine 调用 |
+| `src/download/engine.js` | 新增 | ~290 | 并发队列 + `.tmp` 断点续传 + TPS 门控 + 严格大小校验 + HTML 反爬识别 + 进度上报 | 依赖 http/lock |
+| `src/download/plan.js` | 新增 | ~100 | 作品 JSON → 下载任务（单图/多图/动图），纯函数可离线测 | 依赖 names/ugoira |
+| `src/download/ugoira.js` | 新增 | ~80 | 动图（zip 地址推导、帧延时、zip 魔数校验） | 被 plan/engine 调用 |
+| `src/util/lock.js` | 新增 | ~90 | 跨进程文件锁（pid + 陈旧接管） | 被 engine 调用 |
 | `src/store/json.js` | 新增 | ~100 | JSON 原子读写基础（损坏留档、绝不删除） | 被 stores 调用 |
 | `src/store/stores.js` | 新增 | ~130 | 黑名单 / 待下载清单 / 历史记录 | 依赖 json |
 | `src/util/names.js` | 新增 | ~110 | 画师目录名 / 作品文件名净化与反解 | 被 download 调用 |
@@ -275,6 +277,9 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | Step 3 完成（`lib/pixiv.js`：PKCE 登录 / refresh token / 关注 / 画师作品 / 收藏 / 作品详情 / 动图元数据 / 分页），`test/pixiv-api-check.mjs` **10 PASS**（含在线：未鉴权请求被 Pixiv 拒绝且错误信息正确解析） | — |
 | 2026-10-13 | 实测发现：Pixiv 对「缺 Authorization」的业务请求返回 **400**（不是 401），错误信息为 `Error occurred at the OAuth process. Please check your Authorization header.` → 断言改为 400/401 双接受 | 待固化：第三方 API 的错误码不能凭直觉假设 |
 | 2026-10-13 | 历史重写：`pxder-legacy` = `1bf8aaa`（124 提交旧历史）；新 main 以 orphan 根提交 `490be86`（内容＝重构起点旧代码快照）为起点，重放重构期提交。验证：新 HEAD tree `c2f1aef` 与重写前 `6b59f48` tree **完全一致**（零丢失）；工作区干净 | — |
+| 2026-10-13 | 目录架构重组：扁平 `lib/` → 分层 `src/`（net/pixiv/download/store/util），`http.js` 513 行拆为 http/proxy/limiter；全部 `git mv` 保历史，回归 20+14+10+9 全 PASS | — |
+| 2026-10-13 | Step 6 完成（下载引擎）：`src/download/{engine,plan,ugoira}.js` + `src/util/lock.js`；`test/download-engine-check.mjs` **13 PASS**（本地 HTTP 服务器验证续传/忽略 Range/416/大小不符/HTML 反爬/404/并发上限/dryrun）、`test/download-plan-check.mjs` **11 PASS** | — |
+| 2026-10-13 | 测试抓到真 bug：`illustToTasks(null)` 抛 TypeError（漏空值守卫）→ 已修（返回空数组并跳过无 id 条目） | 待固化：纯函数入口必须做输入守卫 |
 | 2026-10-13 | Step 4 完成（`lib/names.js` 命名净化 + `lib/store.js` JSON 原子读写），`test/store-names-check.mjs` **20 PASS**（含「损坏文件改名留档不删」「store 模块无删除类 API」两条针对旧 bug 的断言）；`config.js` 增 `stateDir`（PXREPO_STATE_DIR，默认数据根下 `.pxrepo`）| 待固化：状态文件三条纪律（不用 require 读可变 JSON / 绝不删用户文件 / 原子写） |
 
 ---
