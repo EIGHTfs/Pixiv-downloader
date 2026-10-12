@@ -292,6 +292,8 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | Step 7 完成（CLI 编排层）：`cli.js`（参数解析双兼容 + 分发 + 帮助/版本，VERSION=5.0.0）+ `src/cli/{context,fetch,commands}.js`（上下文装配 / 分页拉取与公共下载编排 / 11 个命令）；`test/cli-args-check.mjs` **18 PASS**；CLI 冒烟：`--version`/`--setting` 正常，未登录退出码 1、帮助 0、无命令 2 | 待固化：可选值参数的「吃不吃下一个 token」判定规则 |
 | 2026-10-13 | Step 8 完成（零依赖收口）：旧实现与 npm 清单 25 个文件移入 `.trash/2026-10-13-pre-refactor`（不删除、可恢复，另在 `pxder-legacy` 分支与根提交中留存）；收口后仅剩新架构，零 node_modules / 零 npm 依赖 | 待固化：`git_commit_push` 的 paths 不能包含已移走的路径（否则 add 报 pathspec 错） |
 | 2026-10-13 | Step 9 完成（测试体系）：新增 `test/run-all.mjs` 一键运行器与 `test/cli-e2e-check.mjs`（免登录端到端：清理进回收站/拆分不改原文件/退出码）；`live-pixiv-check.mjs` 增加**下载引擎环节**（真实 CDN 经代理下载 → 与流式结果 SHA256 逐字节一致 → 重复下载命中跳过）。全量 **117 PASS / 0 FAIL** | 待固化：真实 CDN 必须带 Referer（缺则 403），引擎已加诊断提示 |
+| 2026-10-13 | 消除审计 blocker：拆分 `downloadOne`（127→60 行，抽 5 个职责函数）、`socks5Connect`（94 行 → 会话状态机 + 三阶段处理函数 + 协议常量表）、`createProgressTracker`（63→55 行）；全量审计有效 blocker 归零（`blocked` 列表为空） | 待固化：审计摘要的 blocker 数是「豁免前计数」，判定以 `blocked` 列表为准 |
+| 2026-10-13 | Step 10 收尾之一：README 全面重写——特性表 / 架构与数据流 / 安装 / 快速开始 / 命令参考 / `.env` 全量说明 / **六个功能完整流程**（登录、拉关注、按清单下载、单文件续传、清理、拆分）/ 命名规则 / 代理与网络 / 测试清单 / 版本记录（v5.0.0）；按决策⑦**不再保留来源声明** | — |
 | 2026-10-13 | Step 4 完成（`lib/names.js` 命名净化 + `lib/store.js` JSON 原子读写），`test/store-names-check.mjs` **20 PASS**（含「损坏文件改名留档不删」「store 模块无删除类 API」两条针对旧 bug 的断言）；`config.js` 增 `stateDir`（PXREPO_STATE_DIR，默认数据根下 `.pxrepo`）| 待固化：状态文件三条纪律（不用 require 读可变 JSON / 绝不删用户文件 / 原子写） |
 
 ---
