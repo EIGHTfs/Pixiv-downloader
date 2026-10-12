@@ -1,7 +1,7 @@
 # 修改方案：按 Pawchive-downloader 范式重构 pxrepo（零依赖 CLI）
 
 > 状态：**待执行**（2026-10-13）
-> 设计决策：①CLI 双兼容（保留原参数语义 + 新增 Pawchive 风格参数）②完全零依赖（只用 Node 内置，代理仅 http(s)）③砍掉 Windows 专属功能 ④配置只用 `.env`，不兼容旧 `config/` ⑤改名范围＝本地目录 + GitHub 仓库都改为 `Pixiv-downloader`，置于最后一步执行 ⑥环境变量前缀保持 `PXREPO_*` 不变 ⑦README 重写：功能流程/用法/版本记录，**大重构后不再保留「源码来自 pxder」的来源声明**
+> 设计决策：①CLI 双兼容（保留原参数语义 + 新增 Pawchive 风格参数）②完全零依赖（只用 Node 内置，代理支持 http(s) 与 SOCKS5）③砍掉 Windows 专属功能 ④配置只用 `.env`，不兼容旧 `config/` ⑤改名范围＝本地目录 + GitHub 仓库都改为 `Pixiv-downloader`，置于最后一步执行 ⑥环境变量前缀保持 `PXREPO_*` 不变 ⑦README 重写：功能流程/用法/版本记录，**大重构后不再保留「源码来自 pxder」的来源声明** ⑧历史策略：旧 pxder 历史（124 提交）转入 `pxder-legacy` 分支，默认分支只保留「重构起点」之后的演进（orphan 根提交 + 分步提交重放）
 > 执行中若方案有修改，针对修改部分重写并整份覆盖入库。
 
 ---
@@ -259,6 +259,8 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | 方案扩展已确认并落地：`lib/http.js` 增加零依赖 SOCKS5（手写 RFC1928/1929），`test/http-proxy-check.mjs` 本地 CONNECT+SOCKS5 自检 **10/10 PASS**；`test/live-pixiv-check.mjs` 真实链路 **8/8 PASS**（公开 ajax 取原图地址 → 经代理下载 → 与 curl 参考图 SHA256 逐字节一致） | 待固化：用本地代理自证链路（区分「代理全死」与「实现有 bug」） |
 | 2026-10-13 | Step 3 完成（`lib/pixiv.js`：PKCE 登录 / refresh token / 关注 / 画师作品 / 收藏 / 作品详情 / 动图元数据 / 分页），`test/pixiv-api-check.mjs` **10 PASS**（含在线：未鉴权请求被 Pixiv 拒绝且错误信息正确解析） | — |
 | 2026-10-13 | 实测发现：Pixiv 对「缺 Authorization」的业务请求返回 **400**（不是 401），错误信息为 `Error occurred at the OAuth process. Please check your Authorization header.` → 断言改为 400/401 双接受 | 待固化：第三方 API 的错误码不能凭直觉假设 |
+| 2026-10-13 | 历史重写：`pxder-legacy` = `1bf8aaa`（124 提交旧历史）；新 main 以 orphan 根提交 `490be86`（内容＝重构起点旧代码快照）为起点，重放重构期提交。验证：新 HEAD tree `c2f1aef` 与重写前 `6b59f48` tree **完全一致**（零丢失）；工作区干净 | — |
+| 2026-10-13 | Step 4 完成（`lib/names.js` 命名净化 + `lib/store.js` JSON 原子读写），`test/store-names-check.mjs` **20 PASS**（含「损坏文件改名留档不删」「store 模块无删除类 API」两条针对旧 bug 的断言）；`config.js` 增 `stateDir`（PXREPO_STATE_DIR，默认数据根下 `.pxrepo`）| 待固化：状态文件三条纪律（不用 require 读可变 JSON / 绝不删用户文件 / 原子写） |
 
 ---
 
