@@ -82,15 +82,20 @@
 
 | 文件 | 操作 | 行数预估 | 功能描述 | 依赖关系 |
 |---|---|---|---|---|
-| `cli.js` | 新增 | +450 | 参数解析 + 命令编排 | 依赖全部 `lib/*` |
-| `lib/config.js` | 新增 | +90 | `.env` 读取 + 默认值 + 校验（**不读旧 `config/`**） | 被 cli/download 调用 |
-| `lib/http.js` | 新增 | +150 | `node:https` 封装：超时/重试退避/429 退避/http(s) 代理/可选 HTTPDNS | 被 pixiv/download 调用 |
-| `lib/pixiv.js` | 新增 | +320 | OAuth PKCE + refresh token + 端点封装 + `X-Client-Hash`（自写 md5） | 依赖 http |
-| `lib/download.js` | 新增 | +260 | 并发队列 + `.tmp` 断点 + TPS 门控 + 大小校验 + ugoira | 依赖 http/store/progress |
-| `lib/progress.js` | 移植 | ±130 | 三样式进度条（single/multi/ipull） | 被 cli/download 调用 |
-| `lib/store.js` | 新增 | +80 | JSON 原子读写（blacklist/download/history） | 被 cli/download 调用 |
-| `lib/names.js` | 新增 | +60 | 画师目录名/文件名净化（去摊位后缀 + 非法字符） | 被 download 调用 |
-| `test/*.mjs` | 新增 | +400 | 零依赖断言脚本 | 依赖 lib |
+| `cli.js` | 新增 | +450 | 参数解析 + 命令编排 | 依赖 `src/**` |
+| `src/config.js` | 新增 | ~230 | `.env` 读取 + 默认值 + 类型转换 + 校验 + `stateDir`（**不读旧 `config/`**） | 被 cli/download 调用 |
+| `src/net/http.js` | 新增 | ~250 | 请求层：超时 / 重试退避 / 429 / Retry-After / 解压 / 连接分派 | 依赖 proxy、limiter |
+| `src/net/proxy.js` | 新增 | ~280 | 代理解析 + CONNECT 隧道 + **零依赖 SOCKS5 握手** + HTTPDNS 映射 | 被 http 调用 |
+| `src/net/limiter.js` | 新增 | ~40 | 令牌桶 TPS 限速 + sleep | 被 http 调用 |
+| `src/pixiv/auth.js` | 新增 | ~170 | 协议常量 / 伪装请求头 / `X-Client-Hash` / PKCE / token 交换与刷新 | 被 client 调用 |
+| `src/pixiv/client.js` | 新增 | ~180 | API 端点封装 + 错误解析 + 401 自动刷新重试 | 依赖 auth |
+| `src/download/engine.js` | 新增 | +260 | 并发队列 + `.tmp` 断点 + TPS 门控 + 大小校验 | 依赖 http/store/progress |
+| `src/download/ugoira.js` | 新增 | +80 | 动图（zip 命名与校验） | 被 engine 调用 |
+| `src/store/json.js` | 新增 | ~100 | JSON 原子读写基础（损坏留档、绝不删除） | 被 stores 调用 |
+| `src/store/stores.js` | 新增 | ~130 | 黑名单 / 待下载清单 / 历史记录 | 依赖 json |
+| `src/util/names.js` | 新增 | ~110 | 画师目录名 / 作品文件名净化与反解 | 被 download 调用 |
+| `src/util/progress.js` | 移植 | ~190 | 三样式进度条（single/multi/ipull） | 被 cli/download 调用 |
+| `test/*.mjs` | 新增 | — | 零依赖断言脚本（相对路径派生，无绝对路径） | 依赖 `src/**` |
 | `docs/2026-10-13-重构pxrepo为零依赖CLI.MD` | 新增 | — | 本方案 | 无 |
 | `README.md` | 重写 | — | 功能流程 + 用法 + 版本记录 | 无 |
 | `package.json` / `package-lock.json` / `src/` / `bin/` / `pxrepo` / `pxrepo.cmd` / `pxrepo.ps1` / `index.js` | 移入 `.trash/` | — | 零依赖收口（**安全删除：mv 不 rm**） | 无 |
@@ -102,19 +107,29 @@
 ### 5.1 目录结构
 
 ```
-pxrepo/
-├── cli.js                 # 唯一入口（node cli.js ...）
-├── lib/
-│   ├── config.js          # .env + 默认值
-│   ├── http.js            # https 封装（超时/重试/代理）
-│   ├── pixiv.js           # API 客户端 + 鉴权
-│   ├── download.js        # 下载引擎
-│   ├── progress.js        # 进度条三样式
-│   ├── store.js           # JSON 原子读写
-│   └── names.js           # 命名净化
-├── test/                  # 零依赖测试脚本
-├── docs/                  # 方案与调查
-├── .env / env.example     # 配置（.env 不入库）
+Pixiv-downloader/
+├── cli.js                     # 唯一入口：参数解析 + 命令分发（薄）
+├── src/
+│   ├── config.js              # 配置（.env / 默认值 / 校验 / stateDir）
+│   ├── net/
+│   │   ├── http.js            # 请求层（超时 / 重试 / 解压 / 连接分派）
+│   │   ├── proxy.js           # 代理（http CONNECT + SOCKS5 握手 + HTTPDNS）
+│   │   └── limiter.js         # TPS 限速
+│   ├── pixiv/
+│   │   ├── auth.js            # 协议常量 / 鉴权头 / PKCE / token
+│   │   └── client.js          # API 端点客户端
+│   ├── download/
+│   │   ├── engine.js          # 下载引擎（并发 / .tmp 断点 / 校验）
+│   │   └── ugoira.js          # 动图
+│   ├── store/
+│   │   ├── json.js            # JSON 原子读写基础
+│   │   └── stores.js          # 黑名单 / 任务清单 / 历史
+│   └── util/
+│       ├── names.js           # 命名净化
+│       └── progress.js        # 进度条
+├── test/                      # 零依赖测试脚本
+├── docs/                      # 方案与调查
+├── .env / env.example         # 配置（.env 不入库）
 └── README.md
 ```
 

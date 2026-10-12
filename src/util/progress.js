@@ -1,6 +1,6 @@
 'use strict';
 /**
- * lib/progress.js —— 下载进度条（TTY 实时渲染，零依赖）
+ * src/util/progress.js —— 下载进度条（TTY 实时渲染，零依赖）
  *
  * 三个样式（`--progress` 参数 / `PXREPO_PROGRESS` 环境变量）：
  *   single —— 单行汇总（任务少时最简洁）

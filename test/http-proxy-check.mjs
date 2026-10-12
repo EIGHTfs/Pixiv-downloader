@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * test/http-proxy-check.mjs —— lib/http.js 代理链路自检
+ * test/http-proxy-check.mjs —— src/net/http.js 代理链路自检
  *
  * 为什么要这个测试：
  *   公开代理批量探测全失败时，必须能区分「代理都是死的」与「我的 CONNECT 实现有 bug」。
  *   本测试在本地起一个真实 CONNECT 代理（node:http 的 connect 事件 + net 转发），
- *   让 lib/http.js 走完整链路：CONNECT 隧道 → TLS 包装 → HTTP 请求 → 响应解压。
+ *   让 src/net/http.js 走完整链路：CONNECT 隧道 → TLS 包装 → HTTP 请求 → 响应解压。
  *   因此它不依赖任何外部代理，可离线复现。
  *
  * 覆盖场景：
  *   1. 经本地 CONNECT 代理请求 https 站点 → 200 且 body 可解析
- *   2. 代理要求 Basic 认证时，lib/http.js 正确带上 Proxy-Authorization
+ *   2. 代理要求 Basic 认证时，src/net/http.js 正确带上 Proxy-Authorization
  *   3. 代理认证失败（407）时报错信息清晰
  *   4. 代理端口不通时报错清晰
  *
@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { createHttp } = require(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'http.js'));
+const { createHttp } = require(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'net', 'http.js'));
 
 const TARGET = process.env.PROBE_TARGET || 'https://api.github.com/';
 
@@ -66,7 +66,7 @@ function startProxy(opts = {}) {
 }
 
 /**
- * 启动本地 SOCKS5 代理（手写最小实现，用于验证 lib/http.js 的 SOCKS5 客户端）
+ * 启动本地 SOCKS5 代理（手写最小实现，用于验证 src/net/http.js 的 SOCKS5 客户端）
  * 只实现 CONNECT 命令 + 可选用户名密码认证，够验证链路即可。
  * @param {{requireAuth?: boolean}} opts
  */

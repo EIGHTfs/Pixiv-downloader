@@ -23,7 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { createHttp } = require(join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'http.js'));
+const { createHttp } = require(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'net', 'http.js'));
 
 /** 解析命令行参数 */
 function parseArgv(argv) {

@@ -30,8 +30,12 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const names = require(join(ROOT, 'lib', 'names.js'));
-const store = require(join(ROOT, 'lib', 'store.js'));
+const names = require(join(ROOT, 'src', 'util', 'names.js'));
+// 存储层拆成两个模块：json.js（原子读写基础）+ stores.js（黑名单/任务清单/历史）
+// 测试内聚合，便于一次性断言「两个模块都不导出删除类 API」
+const jsonStore = require(join(ROOT, 'src', 'store', 'json.js'));
+const stores = require(join(ROOT, 'src', 'store', 'stores.js'));
+const store = { ...jsonStore, ...stores };
 
 let pass = 0;
 let fail = 0;

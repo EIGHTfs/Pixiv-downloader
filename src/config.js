@@ -1,6 +1,6 @@
 'use strict';
 /**
- * lib/config.js —— 配置层（零依赖）
+ * src/config.js —— 配置层（零依赖）
  *
  * 职责：
  *   1. 解析项目根目录的 `.env`（自写解析器，不引入 dotenv 等依赖）
@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-/** 项目根目录（lib/ 的上一级）——所有相对路径都以它为基准，避免依赖 cwd */
+/** 项目根目录（src/ 的上一级）——所有相对路径都以它为基准，避免依赖 cwd */
 const ROOT = path.resolve(__dirname, '..');
 /** .env 固定位置：项目根（不随 cwd 漂移） */
 const ENV_FILE = path.join(ROOT, '.env');
@@ -41,7 +41,7 @@ const DEFAULTS = Object.freeze({
   stateDir: '',            // PXREPO_STATE_DIR    状态文件目录（黑名单/任务清单/历史）；空=数据根下 .pxrepo
 });
 
-/** 允许的进度条样式（与 lib/progress.js 保持一致） */
+/** 允许的进度条样式（与 src/util/progress.js 保持一致） */
 const PROGRESS_STYLES = Object.freeze(['single', 'multi', 'ipull']);
 
 /**

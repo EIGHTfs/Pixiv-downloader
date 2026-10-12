@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const { createProgressTracker, fmtBytes, fmtSpeed, barOf, isTty } = require(join(ROOT, 'lib', 'progress.js'));
+const { createProgressTracker, fmtBytes, fmtSpeed, barOf, isTty } = require(join(ROOT, 'src', 'util', 'progress.js'));
 
 let pass = 0;
 let fail = 0;

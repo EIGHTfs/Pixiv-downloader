@@ -1,6 +1,6 @@
 'use strict';
 /**
- * lib/names.js —— 画师目录名 / 文件名净化（零依赖）
+ * src/util/names.js —— 画师目录名 / 文件名净化（零依赖）
  *
  * 为什么单独成模块：旧实现把这段逻辑散在 illustrator.js / illust.js / plugins/utils.js 三处，
  * 结果出现「PID 目录名一处写 'PID'、另一处写 '「PID」'」这类不一致。集中一处便于测试与复用。

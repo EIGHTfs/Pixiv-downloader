@@ -26,8 +26,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
-const config = require(join(ROOT, 'lib', 'config.js'));
-const { createHttp } = require(join(ROOT, 'lib', 'http.js'));
+const config = require(join(ROOT, 'src', 'config.js'));
+const { createHttp } = require(join(ROOT, 'src', 'net', 'http.js'));
 
 let pass = 0;
 let fail = 0;
