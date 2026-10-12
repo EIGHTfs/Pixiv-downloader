@@ -294,6 +294,8 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | Step 9 完成（测试体系）：新增 `test/run-all.mjs` 一键运行器与 `test/cli-e2e-check.mjs`（免登录端到端：清理进回收站/拆分不改原文件/退出码）；`live-pixiv-check.mjs` 增加**下载引擎环节**（真实 CDN 经代理下载 → 与流式结果 SHA256 逐字节一致 → 重复下载命中跳过）。全量 **117 PASS / 0 FAIL** | 待固化：真实 CDN 必须带 Referer（缺则 403），引擎已加诊断提示 |
 | 2026-10-13 | 消除审计 blocker：拆分 `downloadOne`（127→60 行，抽 5 个职责函数）、`socks5Connect`（94 行 → 会话状态机 + 三阶段处理函数 + 协议常量表）、`createProgressTracker`（63→55 行）；全量审计有效 blocker 归零（`blocked` 列表为空） | 待固化：审计摘要的 blocker 数是「豁免前计数」，判定以 `blocked` 列表为准 |
 | 2026-10-13 | Step 10 收尾之一：README 全面重写——特性表 / 架构与数据流 / 安装 / 快速开始 / 命令参考 / `.env` 全量说明 / **六个功能完整流程**（登录、拉关注、按清单下载、单文件续传、清理、拆分）/ 命名规则 / 代理与网络 / 测试清单 / 版本记录（v5.0.0）；按决策⑦**不再保留来源声明** | — |
+| 2026-10-13 | Step 10 收尾之二：本地目录改名 `Pixiv-downloader`；GitHub 仓库改名 `EIGHTfs/Pixiv-downloader` 并更新 remote；推送 `pxder-legacy`（旧 124 提交保底）+ `main` 显式 lease 强推（1bf8aaa → 222fc11） | 待固化：改名后 `--force-with-lease` 会因 tracking 引用过期报 stale info，需用 `--force-with-lease=main:<已知远端SHA>` |
+| 2026-10-13 | 黑名单做实（明确语义：下载时跳过这些作者）：新增 `PXREPO_BLACKLIST`（默认 `<stateDir>/blacklist.json`）；首次使用自动迁移旧 `config/blacklist.json`（**复制条目不删旧文件、不覆盖已存在目标、打印来源去向**）；两者皆无时播种默认项（跳过 pixiv 事务局 id=11）；下载命中黑名单**不发任何请求**；接口明确拒绝（PixivError）的作者自动拉黑并可 `-l` 移出；新增 `test/blacklist-check.mjs` **8 PASS**；全量 **113 PASS / 0 FAIL** | 待固化：用户数据迁移三原则（复制不删 / 不覆盖 / 迁移可见） |
 | 2026-10-13 | Step 4 完成（`lib/names.js` 命名净化 + `lib/store.js` JSON 原子读写），`test/store-names-check.mjs` **20 PASS**（含「损坏文件改名留档不删」「store 模块无删除类 API」两条针对旧 bug 的断言）；`config.js` 增 `stateDir`（PXREPO_STATE_DIR，默认数据根下 `.pxrepo`）| 待固化：状态文件三条纪律（不用 require 读可变 JSON / 绝不删用户文件 / 原子写） |
 
 ---
