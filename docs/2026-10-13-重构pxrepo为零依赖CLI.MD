@@ -100,7 +100,9 @@
 | `src/store/stores.js` | 新增 | ~130 | 黑名单 / 待下载清单 / 历史记录 | 依赖 json |
 | `src/util/names.js` | 新增 | ~110 | 画师目录名 / 作品文件名净化与反解 | 被 download 调用 |
 | `src/util/progress.js` | 移植 | ~190 | 三样式进度条（single/multi/ipull） | 被 cli/download 调用 |
-| `test/*.mjs` | 新增 | — | 零依赖断言脚本（相对路径派生，无绝对路径） | 依赖 `src/**` |
+| `test/run-all.mjs` | 新增 | ~110 | 一键跑全部测试（`--all/--only/--list`，退出码 2 记为 SKIP） | 无依赖 |
+| `test/*-check.mjs` | 新增 | — | 9 个断言脚本：参数解析 18、CLI 端到端 10、下载引擎 13、任务规划 11、代理链路 10、真实链路 12、Pixiv 客户端 10、进度条 14、命名与存储 20（**合计 117 断言**） | 依赖 `src/**` |
+| `test/{probe-proxy,live-pixiv-check}.mjs` | 新增 | — | 工具型脚本：代理批量探测 / 真实 Pixiv 链路（需代理环境） | 依赖 `src/net` |
 | `docs/2026-10-13-重构pxrepo为零依赖CLI.MD` | 新增 | — | 本方案 | 无 |
 | `README.md` | 重写 | — | 功能流程 + 用法 + 版本记录 | 无 |
 | `package.json` / `package-lock.json` / `src/` / `bin/` / `pxrepo` / `pxrepo.cmd` / `pxrepo.ps1` / `index.js` | 移入 `.trash/` | — | 零依赖收口（**安全删除：mv 不 rm**） | 无 |
@@ -288,6 +290,8 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | Step 6 完成（下载引擎）：`src/download/{engine,plan,ugoira}.js` + `src/util/lock.js`；`test/download-engine-check.mjs` **13 PASS**（本地 HTTP 服务器验证续传/忽略 Range/416/大小不符/HTML 反爬/404/并发上限/dryrun）、`test/download-plan-check.mjs` **11 PASS** | — |
 | 2026-10-13 | 测试抓到真 bug：`illustToTasks(null)` 抛 TypeError（漏空值守卫）→ 已修（返回空数组并跳过无 id 条目） | 待固化：纯函数入口必须做输入守卫 |
 | 2026-10-13 | Step 7 完成（CLI 编排层）：`cli.js`（参数解析双兼容 + 分发 + 帮助/版本，VERSION=5.0.0）+ `src/cli/{context,fetch,commands}.js`（上下文装配 / 分页拉取与公共下载编排 / 11 个命令）；`test/cli-args-check.mjs` **18 PASS**；CLI 冒烟：`--version`/`--setting` 正常，未登录退出码 1、帮助 0、无命令 2 | 待固化：可选值参数的「吃不吃下一个 token」判定规则 |
+| 2026-10-13 | Step 8 完成（零依赖收口）：旧实现与 npm 清单 25 个文件移入 `.trash/2026-10-13-pre-refactor`（不删除、可恢复，另在 `pxder-legacy` 分支与根提交中留存）；收口后仅剩新架构，零 node_modules / 零 npm 依赖 | 待固化：`git_commit_push` 的 paths 不能包含已移走的路径（否则 add 报 pathspec 错） |
+| 2026-10-13 | Step 9 完成（测试体系）：新增 `test/run-all.mjs` 一键运行器与 `test/cli-e2e-check.mjs`（免登录端到端：清理进回收站/拆分不改原文件/退出码）；`live-pixiv-check.mjs` 增加**下载引擎环节**（真实 CDN 经代理下载 → 与流式结果 SHA256 逐字节一致 → 重复下载命中跳过）。全量 **117 PASS / 0 FAIL** | 待固化：真实 CDN 必须带 Referer（缺则 403），引擎已加诊断提示 |
 | 2026-10-13 | Step 4 完成（`lib/names.js` 命名净化 + `lib/store.js` JSON 原子读写），`test/store-names-check.mjs` **20 PASS**（含「损坏文件改名留档不删」「store 模块无删除类 API」两条针对旧 bug 的断言）；`config.js` 增 `stateDir`（PXREPO_STATE_DIR，默认数据根下 `.pxrepo`）| 待固化：状态文件三条纪律（不用 require 读可变 JSON / 绝不删用户文件 / 原子写） |
 
 ---

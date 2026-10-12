@@ -129,6 +129,15 @@ async function downloadOne(task, ctx) {
       if (tracker) tracker.onFinish(label, 'failed');
       return { status: 'failed', bytes: 0, reason: `HTTP ${res.status}（作品可能已删除）` };
     }
+    if (res.status === 403) {
+      // 实测：i.pximg.net 缺 Referer 就是 403（不是权限问题），这里给出可操作的提示
+      if (tracker) tracker.onFinish(label, 'failed');
+      return {
+        status: 'failed',
+        bytes: 0,
+        reason: task.referer ? 'HTTP 403（Referer 被拒绝）' : 'HTTP 403（图片 CDN 需要 Referer，任务未带 referer）',
+      };
+    }
     if (res.status === 416) {
       // 请求范围不可满足：说明 .tmp 已不小于目标长度 → 按大小判定能否直接落盘
       const size = fs.statSync(tmpPath).size;
