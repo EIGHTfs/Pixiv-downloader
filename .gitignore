@@ -1,0 +1,10 @@
+
+config/download.json
+config/history.json
+config/config.json
+node_modules
+temp
+update.json
+# 备份文件（*.bak 旧备份不入库）
+*.bak
+node_modules.orig/

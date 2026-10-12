@@ -1,0 +1,17 @@
+{
+	"printWidth": 200,
+	"singleQuote": true,
+	"trailingComma": "es5",
+	"arrowParens": "avoid",
+	"useTabs": true,
+	"tabWidth": 4,
+	"semi": true,
+	"overrides": [
+		{
+			"files": "src/pixiv-api-client-mod.js",
+			"options": {
+				"useTabs": false
+			}
+		}
+	]
+}
