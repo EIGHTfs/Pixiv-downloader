@@ -39,6 +39,7 @@ const DEFAULTS = Object.freeze({
   timeoutMs: 30000,        // PXREPO_TIMEOUT_MS   单请求超时（毫秒）
   retries: 3,              // PXREPO_RETRIES      失败重试次数（指数退避）
   stateDir: '',            // PXREPO_STATE_DIR    状态文件目录（黑名单/任务清单/历史）；空=数据根下 .pxrepo
+  blacklistFile: '',       // PXREPO_BLACKLIST    黑名单文件路径；空=<stateDir>/blacklist.json
 });
 
 /** 允许的进度条样式（与 src/util/progress.js 保持一致） */
@@ -147,6 +148,7 @@ function load(opts = {}) {
     timeoutMs: toInt(raw('PXREPO_TIMEOUT_MS'), DEFAULTS.timeoutMs),
     retries: toInt(raw('PXREPO_RETRIES'), DEFAULTS.retries),
     stateDir: expandHome(raw('PXREPO_STATE_DIR') || ''),
+    blacklistFile: expandHome(raw('PXREPO_BLACKLIST') || ''),
     // 元信息（不参与业务判断，仅用于日志/排查）
     _root: ROOT,
     _envFile: opts.envFile || ENV_FILE,
@@ -161,6 +163,8 @@ function load(opts = {}) {
   if (!PROGRESS_STYLES.includes(config.progress)) config.progress = DEFAULTS.progress;
   // 状态目录缺省：数据根下的 .pxrepo（数据根也没有时退回项目根，保证 --login 等命令仍可用）
   if (!config.stateDir) config.stateDir = path.join(config.dataRoot || ROOT, '.pxrepo');
+  // 黑名单文件缺省：状态目录下的 blacklist.json（可用 PXREPO_BLACKLIST 指向别处）
+  if (!config.blacklistFile) config.blacklistFile = path.join(config.stateDir, 'blacklist.json');
 
   return config;
 }

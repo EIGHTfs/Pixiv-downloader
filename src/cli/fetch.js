@@ -11,6 +11,7 @@ const path = require('node:path');
 const { illustsToTasks } = require('../download/plan.js');
 const { downloadAll } = require('../download/engine.js');
 const { fetchUgoiraDelay, isUgoira } = require('../download/ugoira.js');
+const { PixivError } = require('../pixiv/client.js');
 const names = require('../util/names.js');
 
 /** 图片 CDN 必须带 Referer，否则 403（实测：无 Referer=403 / 带 Referer=正常） */
@@ -160,7 +161,13 @@ async function downloadForCreators(ctx, creators) {
       console.log(`${position} 完成：任务 ${taskCount}｜新 ${result.downloaded} 跳过 ${result.existed} 失败 ${result.failed}`);
     } catch (err) {
       summary.failed++;
-      console.error(`${position} 失败 uid=${uid}：${String(err && err.message || err).slice(0, 140)}`);
+      const message = String(err && err.message || err).slice(0, 140);
+      console.error(`${position} 失败 uid=${uid}：${message}`);
+      // 旧版行为：接口明确拒绝该用户（PixivError，如账号已注销/被限制）时自动拉黑，
+      // 避免每次更新都在同一个人身上反复撞墙。可用 `-l <uid>` 随时移出。
+      if (err instanceof PixivError && ctx.stores.blacklist.add(uid, `自动：${message.slice(0, 60)}`)) {
+        console.error(`${position} 已自动加入黑名单（uid=${uid}；用 node cli.js -l ${uid} 可移出）`);
+      }
     }
   }
   return summary;

@@ -12,7 +12,7 @@ const configModule = require('../config.js');
 const { createHttp } = require('../net/http.js');
 const { PixivClient } = require('../pixiv/client.js');
 const { createProgressTracker, isTty } = require('../util/progress.js');
-const { stateFile, ensureStateDir } = require('../store/json.js');
+const { stateFile, ensureStateDir, ensureDir, readJson, writeJsonAtomic } = require('../store/json.js');
 const { createBlacklistStore, createTaskListStore, createHistoryStore } = require('../store/stores.js');
 
 /**
@@ -57,6 +57,32 @@ function removeEnvValue(envFile, key) {
   return envFile;
 }
 
+/** 旧版黑名单位置（迁移用；只读不删） */
+const LEGACY_BLACKLIST = path.join(configModule.ROOT, 'config', 'blacklist.json');
+/** 默认黑名单项：跳过 pixiv 事务局（官方账号 id=11），与旧版行为一致 */
+const DEFAULT_BLACKLIST_ENTRY = Object.freeze({ id: 11, remarks: 'pixiv 事务局（官方账号）' });
+
+/**
+ * 一次性迁移旧黑名单：目标文件不存在、且旧文件存在时，把旧条目复制过去
+ * 原则：不覆盖已存在的新文件、不删除旧文件（可恢复）
+ * @returns {number} 迁移条数（0 = 没迁移）
+ */
+function migrateLegacyBlacklist(targetFile) {
+  if (fs.existsSync(targetFile)) return 0;
+  if (!fs.existsSync(LEGACY_BLACKLIST)) return 0;
+  const legacy = readJson(LEGACY_BLACKLIST, []);
+  if (!Array.isArray(legacy) || !legacy.length) return 0;
+  writeJsonAtomic(targetFile, legacy);
+  return legacy.length;
+}
+
+/** 黑名单不存在时播种默认项（跳过官方账号） */
+function seedDefaultBlacklist(targetFile) {
+  if (fs.existsSync(targetFile)) return false;
+  writeJsonAtomic(targetFile, [DEFAULT_BLACKLIST_ENTRY]);
+  return true;
+}
+
 /**
  * 组装上下文
  * @param {object} flags parseArgs 的结果
@@ -66,8 +92,15 @@ function createContext(flags) {
   const http = createHttp(cfg);
   const pixiv = new PixivClient({ http, refreshToken: cfg.refreshToken });
   ensureStateDir(cfg);
+
+  // 黑名单：路径可配（PXREPO_BLACKLIST），首次使用会从旧版位置迁移 / 播种默认项
+  ensureDir(path.dirname(cfg.blacklistFile));
+  const migrated = migrateLegacyBlacklist(cfg.blacklistFile);
+  if (migrated) console.log(`[黑名单] 已从旧文件迁移 ${migrated} 条：${LEGACY_BLACKLIST} → ${cfg.blacklistFile}`);
+  if (seedDefaultBlacklist(cfg.blacklistFile)) console.log('[黑名单] 已初始化默认项：跳过 pixiv 事务局（id=11）');
+
   const stores = {
-    blacklist: createBlacklistStore(stateFile(cfg, 'blacklist.json')),
+    blacklist: createBlacklistStore(cfg.blacklistFile),
     tasks: createTaskListStore(stateFile(cfg, 'download.json')),
     history: createHistoryStore(stateFile(cfg, 'history.json')),
   };
@@ -120,6 +153,10 @@ function clearRefreshToken(ctx) {
 
 module.exports = {
   createContext,
+  migrateLegacyBlacklist,
+  seedDefaultBlacklist,
+  LEGACY_BLACKLIST,
+  DEFAULT_BLACKLIST_ENTRY,
   requireLogin,
   requireDataRoot,
   persistRefreshToken,
