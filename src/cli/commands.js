@@ -182,7 +182,11 @@ async function downloadPidsViaWeb(ctx, pids, dir) {
       console.log(`[网页会话] ${meta.title || pid}｜${meta.userName || '?'}｜${urls.length} 页｜xRestrict=${meta.xRestrict}`);
       tasks.push(...webPagesToTasks(meta, urls, { dir, referer: PIXIV_REFERER }));
     } catch (err) {
-      console.log(`跳过 ${pid}：${String(err && err.message || err).slice(0, 100)}`);
+      const status = err && err.status;
+      const hint = status === 404 && !(ctx.web && ctx.web.loggedIn)
+        ? '（404 常见原因：这是 R-18 等需登录作品，匿名访问会被 Pixiv 隐藏；配置 PXREPO_COOKIE 或用 test/pixiv-web-login.mjs 登录后再试）'
+        : '';
+      console.log(`跳过 ${pid}：${String(err && err.message || err).slice(0, 100)}${hint}`);
     }
   }
   if (!tasks.length) return null;
@@ -209,17 +213,15 @@ async function cmdDownloadByPids(ctx) {
   const dir = path.join(dataRoot, '「PID」');
 
   const hasToken = Boolean(ctx.cfg.refreshToken);
-  const hasCookie = Boolean(ctx.web && ctx.web.loggedIn);
-  if (!hasToken && !hasCookie) {
-    throw new Error('未登录：请配置 PXREPO_REFRESH_TOKEN（App API）或 PXREPO_COOKIE / 会话文件（网页会话 Cookie）');
-  }
+  const loggedIn = Boolean(ctx.web && ctx.web.loggedIn);
 
   let result;
   if (hasToken) {
     requireLogin(ctx);
     result = await downloadPidsViaAppApi(ctx, pids, dir);
   } else {
-    console.log('[会话] 使用网页会话 Cookie 下载（无需 App API token）');
+    // 无 App API token：走网页接口（匿名也可读公开作品；R-18 需登录态）
+    if (!loggedIn) console.log('[会话] 匿名模式：只能下公开作品（R-18 会被 Pixiv 以 404 隐藏）');
     result = await downloadPidsViaWeb(ctx, pids, dir);
   }
   if (!result) {

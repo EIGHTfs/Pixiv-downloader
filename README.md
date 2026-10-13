@@ -10,7 +10,7 @@
 | 能力 | 说明 |
 |---|---|
 | 零依赖 | 仅用 `node:http/https/tls/net/zlib/crypto/stream/readline`；仓库内无 `package.json`、无 `node_modules` |
-| 登录 | 三条路：**Cookie 登录**（复用浏览器会话，`PXREPO_COOKIE`）/ OAuth PKCE（`--login`）/ refresh_token；**不保存账号密码** |
+| 登录 | 四条路：**匿名**（公开作品免登录）/ **Cookie 登录**（`PXREPO_COOKIE`）/ OAuth PKCE（`--login`）/ refresh_token；**不保存账号密码** |
 | 关注同步 | 拉取公开/私密关注列表写入清单，支持 `--download` 立即下载 |
 | 收藏下载 | 下载自己的公开/私密收藏到 `「Bookmark」` 目录 |
 | 按 UID / PID | `-u` 批量下画师、`-p` 下指定作品 |
@@ -155,21 +155,14 @@ node cli.js -U --concurrency 3 --tps 1
 
 ### 1. 登录
 
-登录凭据只放本机 `.env`（**已 gitignore，不入库**）；模板见 `env.example`。当前有三条路，按可用性排序：
+登录凭据只放本机 `.env`（**已 gitignore，不入库**）；模板见 `env.example`。四条路按可用性排序：
 
-#### 方式一：refresh_token（推荐，功能最全）
+#### 方式零：匿名（公开作品免登录）
 
-1. `node cli.js --login` 走 OAuth PKCE：生成 `code_verifier`（32 字节随机数 base64url）与 `code_challenge`（其 SHA256 的 base64url）
-2. 打印授权链接（`https://app-api.pixiv.net/web/v1/login?...&code_challenge_method=S256&client=pixiv-android`）
-3. 用户在浏览器完成授权后，把回调地址（或其中 `code=`）粘贴回来（整段 URL 也能识别）
-4. `POST https://oauth.secure.pixiv.net/auth/token`（`grant_type=authorization_code`）换取 token
-5. 把 `refresh_token` 写进 `.env` 的 `PXREPO_REFRESH_TOKEN`（保留文件其余内容与注释）
-6. 之后每次运行：用 refresh_token 换 `access_token`；业务请求带 `Authorization: Bearer`；遇 401 自动刷新一次重试
+`node cli.js -p <PID>` 在**没有任何凭据**时也能跑：匿名走 `www.pixiv.net/ajax/*` 读公开作品的原图地址。
+限制：**R-18 等需登录作品会被 Pixiv 以 404 隐藏**（不是 403），此时按提示配置 Cookie 即可。
 
-> **前提**：执行 `--login` 的机器要能打开 Pixiv（本机需配代理，见「代理与网络」）。
-> 若浏览器打不开 Pixiv，请用方式二。
-
-#### 方式二：Cookie 登录（推荐给「只有账号密码」的用户）
+#### 方式一：Cookie 登录（推荐给「只有账号密码」的用户）
 
 直接复用浏览器里已登录的会话 Cookie，**不需要 App API token，也能下 R-18**：
 
@@ -180,6 +173,19 @@ node cli.js -U --concurrency 3 --tps 1
 
 > 为什么需要它：Pixiv 对**未登录请求隐藏 R-18 作品的图片地址**（`urls.original` 为 `null`，普通作品正常）。
 > Cookie 只用于 ajax 接口；图片 CDN 仍需 `Referer`（引擎已统一带上）。
+
+#### 方式二：refresh_token（App API，功能最全）
+
+1. `node cli.js --login` 走 OAuth PKCE：生成 `code_verifier`（32 字节随机数 base64url）与 `code_challenge`（其 SHA256 的 base64url）
+2. 打印授权链接（`https://app-api.pixiv.net/web/v1/login?...&code_challenge_method=S256&client=pixiv-android`）
+3. 用户在浏览器完成授权后，把回调地址（或其中 `code=`）粘贴回来（整段 URL 也能识别）
+4. `POST https://oauth.secure.pixiv.net/auth/token`（`grant_type=authorization_code`）换取 token
+5. 把 `refresh_token` 写进 `.env` 的 `PXREPO_REFRESH_TOKEN`（保留文件其余内容与注释）
+6. 之后每次运行：用 refresh_token 换 `access_token`；业务请求带 `Authorization: Bearer`；遇 401 自动刷新一次重试
+
+> **前提**：执行 `--login` 的机器要能打开 Pixiv（本机需配代理，见「代理与网络」）。
+> 旧版工具（如历史 `pxrepo`）的 `config/config.json` 里若有 `refresh_token`，可直接粘到 `.env`，无需重新授权。
+> **注意**：Pixiv 已废除 App API 的账号密码授权（实测 `grant_type=password` 返回 `invalid_grant`），所以账号密码只能走方式一或方式三。
 
 #### 方式三：无头浏览器自动登录（账号密码）
 
@@ -195,10 +201,6 @@ node test/pixiv-web-login.mjs --proxies <候选文件>  # 多代理轮试（每�
 - **多代理轮试（学习型）**：候选顺序 = 成功过的（GOOD，新→旧）→ 未失败过的 → 最近失败过的（排最后）；
   结果持久化到 `<状态目录>/proxy-state.json`，失败项 30 分钟内不优先重试（过期自动解冻）
 - 前提：执行机器能访问 Pixiv（需配代理，见「代理与网络」）
-
-#### 方式四：手工提供 refresh_token
-
-旧版工具（如历史 `pxrepo`）的 `config/config.json` 里若有 `refresh_token`，直接粘到 `.env` 的 `PXREPO_REFRESH_TOKEN` 即可，无需重新授权。
 
 > 请求头按官方 Android 客户端伪装：`App-OS/App-OS-Version/App-Version/User-Agent`，并带 `X-Client-Time`（本地时间带时区偏移）与 `X-Client-Hash = md5(X-Client-Time + HASH_SECRET)`。
 
@@ -277,6 +279,22 @@ node test/pixiv-web-login.mjs --proxies <候选文件>  # 多代理轮试（每�
 - SOCKS5 为手写实现（认证协商 + 用户名密码 + 域名交服务端解析），因此**在 DNS 被污染的环境下也能用**
 - 图片 CDN（`i.pximg.net`）必须带 `Referer: https://www.pixiv.net/`，否则返回 403；下载引擎已统一带上，缺 Referer 时会在失败原因里提示
 - 可选 HTTPDNS：`PXREPO_HTTPDNS=1` 时按映射表把域名换 IP 直连（保留 Host 与 SNI），失败自动回退系统 DNS；映射可用 `PXREPO_HTTPDNS_MAP="host=ip,host=ip"` 覆盖
+
+### 本机代理内核（被墙环境用）
+
+本机（NAS）无法直连 Pixiv（DNS 污染 + 直连封锁），可用 Clash 系内核把订阅转成本地代理。实测可复现步骤：
+
+1. **内核放在可执行目录**：`/volume1/VirtualDSM/DeepSeekHarness/tool/mihomo`（注意 `工作区/` 那层挂载**不允许执行二进制**，会报 `Permission denied`，与权限位无关；`/tmp` 是 `noexec` 也不能放）
+2. **写最小配置**：`mixed-port: 7890` + `proxy-providers`（`type: http`，带 `User-Agent: clash-verge/...` 让面板返回 YAML）+ 规则**只把 `pixiv.net`/`pximg.net` 指向代理**，**不要引用 GEOIP/GEOSITE**（否则启动时要下 `geoip.metadb`，本机拉 GitHub release 会超时导致 fatal）
+3. **常驻启动**：`mihomo -d <配置目录> -f <配置.yaml>`（用宿主后台 job 常驻；用 shell `&` 起的进程会随命令结束被回收）
+4. **切到真实节点**：订阅的 `select` 组默认常选中「一元机场.asia」这类**信息占位节点**（连不通）；用 external-controller 切到 url-test 组选出的真实节点：
+   ```bash
+   curl -X PUT -H 'Content-Type: application/json' \
+     --data '{"name":"<真实节点名>"}' http://127.0.0.1:9090/proxies/PROXY
+   ```
+5. `.env` 写 `PXREPO_PROXY=http://127.0.0.1:7890` 即可（本项目的 http 代理支持 CONNECT 隧道）
+
+> 配置文件含订阅令牌，放**状态目录**（`<数据根>/.pxrepo/clash/`）并 `chmod 600`，不要入库。
 
 ---
 

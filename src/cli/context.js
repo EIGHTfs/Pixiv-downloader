@@ -106,10 +106,12 @@ function createContext(flags) {
     history: createHistoryStore(stateFile(cfg, 'history.json')),
   };
 
-  // 网页会话（Cookie 认证）：配置了 PXREPO_COOKIE 或存在会话文件时启用
+  // 网页会话客户端：始终创建（匿名也能读公开作品的 ajax 接口）；
+  // 配了 PXREPO_COOKIE / 存在会话文件时即为「已登录」，可读 R-18 等需登录作品
   const cookieInfo = resolveCookie(cfg);
-  const web = cookieInfo.header ? new WebSessionClient({ http, cookie: cookieInfo.header }) : null;
-  if (web) console.log(`[会话] 已加载网页会话 Cookie（来源：${cookieInfo.source}）`);
+  const web = new WebSessionClient({ http, cookie: cookieInfo.header });
+  if (cookieInfo.header) console.log(`[会话] 已加载网页会话 Cookie（来源：${cookieInfo.source}）`);
+  else console.log('[会话] 未登录（公开作品可下载；R-18 等需登录作品请配置 PXREPO_COOKIE 或跑 test/pixiv-web-login.mjs）');
 
   return {
     flags,
