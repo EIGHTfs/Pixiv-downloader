@@ -85,4 +85,27 @@ function illustsToTasks(illusts, opts) {
   return out;
 }
 
-module.exports = { illustToTasks, illustsToTasks, extOf };
+/**
+ * 网页 ajax 形态（作品 meta + 每页原图地址）→ 下载任务
+ * 与 illustToTasks 的区别：网页接口直接给「每页一个原图 URL」，没有 meta_pages/meta_single_page 结构；
+ * 单图是否带 `_pN` 后缀按 pageCount/urls 长度判断（与 App API 路径保持同一种命名约定）。
+ * @param {object} meta 网页 ajax 的 body（含 illustId/title/userId/userName/pageCount）
+ * @param {string[]} urls 每页原图地址
+ * @param {{dir:string, referer:string}} opts
+ */
+function webPagesToTasks(meta, urls, opts) {
+  if (!meta || typeof meta !== 'object') return [];
+  const list = Array.isArray(urls) ? urls.filter(Boolean) : [];
+  if (!list.length) return [];
+  const id = meta.illustId !== undefined ? meta.illustId : meta.id;
+  if (id === undefined || id === null) return [];
+  const title = meta.title || meta.illustTitle || String(id);
+  const multiPage = list.length > 1 || Number(meta.pageCount) > 1;
+  return list.map((url, index) => {
+    const ext = extOf(url, null);
+    const fileName = names.illustFileName({ id, title, page: multiPage ? index : undefined, ext });
+    return { url, savePath: path.join(opts.dir, fileName), label: fileName, referer: opts.referer };
+  });
+}
+
+module.exports = { illustToTasks, illustsToTasks, webPagesToTasks, extOf };

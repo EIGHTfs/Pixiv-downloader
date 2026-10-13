@@ -28,7 +28,10 @@ const {
   fetchIllusts,
   downloadIllusts,
   downloadForCreators,
+  PIXIV_REFERER,
 } = require('./fetch.js');
+const { downloadAll } = require('../download/engine.js');
+const { webPagesToTasks } = require('../download/plan.js');
 const { readJson, writeJsonAtomic, stateFile } = require('../store/json.js');
 const { fmtBytes } = require('../util/progress.js');
 
@@ -153,13 +156,8 @@ async function cmdDownloadByUids(ctx) {
   return summary.failed ? 1 : 0;
 }
 
-/** `-p, --pid <pid(s)>`：按作品 PID 下载到「PID」目录 */
-async function cmdDownloadByPids(ctx) {
-  requireLogin(ctx);
-  const dataRoot = requireDataRoot(ctx);
-  const pids = splitIds(ctx.flags.pid);
-  if (!pids.length) throw new Error('--pid 需要至少一个作品 PID');
-  const dir = path.join(dataRoot, '「PID」');
+/** `-p` 走 App API（需要 refresh_token）：拿作品 JSON 交给公共下载编排 */
+async function downloadPidsViaAppApi(ctx, pids, dir) {
   const illusts = [];
   for (const pid of pids) {
     try {
@@ -170,11 +168,64 @@ async function cmdDownloadByPids(ctx) {
       console.log(`跳过 ${pid}：${String(err && err.message || err).slice(0, 80)}`);
     }
   }
-  if (!illusts.length) {
+  if (!illusts.length) return null;
+  const { result } = await downloadIllusts(ctx, illusts, dir);
+  return result;
+}
+
+/** `-p` 走网页会话（Cookie）：支持未登录拿不到地址的 R-18 作品 */
+async function downloadPidsViaWeb(ctx, pids, dir) {
+  const tasks = [];
+  for (const pid of pids) {
+    try {
+      const { meta, urls } = await ctx.web.illustOriginalUrls(pid);
+      console.log(`[网页会话] ${meta.title || pid}｜${meta.userName || '?'}｜${urls.length} 页｜xRestrict=${meta.xRestrict}`);
+      tasks.push(...webPagesToTasks(meta, urls, { dir, referer: PIXIV_REFERER }));
+    } catch (err) {
+      console.log(`跳过 ${pid}：${String(err && err.message || err).slice(0, 100)}`);
+    }
+  }
+  if (!tasks.length) return null;
+  const tracker = ctx.makeTracker(tasks.length);
+  try {
+    return await downloadAll(tasks, {
+      http: ctx.http,
+      concurrency: ctx.cfg.concurrency,
+      dryrun: ctx.dryrun,
+      tracker,
+      lockDir: path.join(ctx.cfg.stateDir, 'locks'),
+      timeoutMs: ctx.cfg.timeoutMs,
+    });
+  } finally {
+    tracker.finishLine();
+  }
+}
+
+/** `-p, --pid <pid(s)>`：按作品 PID 下载到「PID」目录（有 refresh_token 走 App API，否则走网页会话 Cookie） */
+async function cmdDownloadByPids(ctx) {
+  const dataRoot = requireDataRoot(ctx);
+  const pids = splitIds(ctx.flags.pid);
+  if (!pids.length) throw new Error('--pid 需要至少一个作品 PID');
+  const dir = path.join(dataRoot, '「PID」');
+
+  const hasToken = Boolean(ctx.cfg.refreshToken);
+  const hasCookie = Boolean(ctx.web && ctx.web.loggedIn);
+  if (!hasToken && !hasCookie) {
+    throw new Error('未登录：请配置 PXREPO_REFRESH_TOKEN（App API）或 PXREPO_COOKIE / 会话文件（网页会话 Cookie）');
+  }
+
+  let result;
+  if (hasToken) {
+    requireLogin(ctx);
+    result = await downloadPidsViaAppApi(ctx, pids, dir);
+  } else {
+    console.log('[会话] 使用网页会话 Cookie 下载（无需 App API token）');
+    result = await downloadPidsViaWeb(ctx, pids, dir);
+  }
+  if (!result) {
     console.log('没有可下载的作品');
     return 1;
   }
-  const { result } = await downloadIllusts(ctx, illusts, dir);
   console.log(`汇总：新 ${result.downloaded} 跳过 ${result.existed} 失败 ${result.failed}｜${fmtBytes(result.bytes)}`);
   return result.failed ? 1 : 0;
 }

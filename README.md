@@ -10,7 +10,7 @@
 | 能力 | 说明 |
 |---|---|
 | 零依赖 | 仅用 `node:http/https/tls/net/zlib/crypto/stream/readline`；仓库内无 `package.json`、无 `node_modules` |
-| 登录 | OAuth PKCE 授权（浏览器打开链接 → 粘贴 code）或直接用 refresh token 登录；**只保存 refresh_token，不保存账号密码** |
+| 登录 | 三条路：**Cookie 登录**（复用浏览器会话，`PXREPO_COOKIE`）/ OAuth PKCE（`--login`）/ refresh_token；**不保存账号密码** |
 | 关注同步 | 拉取公开/私密关注列表写入清单，支持 `--download` 立即下载 |
 | 收藏下载 | 下载自己的公开/私密收藏到 `「Bookmark」` 目录 |
 | 按 UID / PID | `-u` 批量下画师、`-p` 下指定作品 |
@@ -143,6 +143,9 @@ node cli.js -U --concurrency 3 --tps 1
 | `PXREPO_PROGRESS` | multi | 进度条样式 |
 | `PXREPO_STATE_DIR` | `<数据根>/.pxrepo` | 状态文件目录（黑名单/清单/历史/锁/回收站） |
 | `PXREPO_BLACKLIST` | `<stateDir>/blacklist.json` | 黑名单文件路径（可指向任意位置） |
+| `PXREPO_COOKIE` | 空 | 网页会话 Cookie 原文（如 `PHPSESSID=xxx; yuid_b=yyy`）——**Cookie 登录**用 |
+| `PXREPO_COOKIE_FILE` | `<stateDir>/web-session.json` | Cookie 文件（浏览器导出 / 登录脚本写入的 JSON） |
+| `PXREPO_PIXIV_ID` / `PXREPO_PIXIV_PASSWORD` | 空 | 仅 `test/pixiv-web-login.mjs` 自动登录用（只读不落盘） |
 
 优先级：**命令行参数 > 真实环境变量 > `.env` 文件 > 内置默认值**。
 
@@ -150,14 +153,47 @@ node cli.js -U --concurrency 3 --tps 1
 
 ## 功能流程详解
 
-### 1. 登录（`--login`）
+### 1. 登录
 
-1. 生成 PKCE 参数：`code_verifier` = 32 字节随机数的 base64url；`code_challenge` = 其 SHA256 的 base64url
+登录凭据只放本机 `.env`（**已 gitignore，不入库**）；模板见 `env.example`。当前有三条路，按可用性排序：
+
+#### 方式一：refresh_token（推荐，功能最全）
+
+1. `node cli.js --login` 走 OAuth PKCE：生成 `code_verifier`（32 字节随机数 base64url）与 `code_challenge`（其 SHA256 的 base64url）
 2. 打印授权链接（`https://app-api.pixiv.net/web/v1/login?...&code_challenge_method=S256&client=pixiv-android`）
 3. 用户在浏览器完成授权后，把回调地址（或其中 `code=`）粘贴回来（整段 URL 也能识别）
 4. `POST https://oauth.secure.pixiv.net/auth/token`（`grant_type=authorization_code`）换取 token
 5. 把 `refresh_token` 写进 `.env` 的 `PXREPO_REFRESH_TOKEN`（保留文件其余内容与注释）
 6. 之后每次运行：用 refresh_token 换 `access_token`；业务请求带 `Authorization: Bearer`；遇 401 自动刷新一次重试
+
+> **前提**：执行 `--login` 的机器要能打开 Pixiv（本机需配代理，见「代理与网络」）。
+> 若浏览器打不开 Pixiv，请用方式二。
+
+#### 方式二：Cookie 登录（推荐给「只有账号密码」的用户）
+
+直接复用浏览器里已登录的会话 Cookie，**不需要 App API token，也能下 R-18**：
+
+1. 浏览器登录 `pixiv.net` → `F12` → **Application → Cookies → `https://www.pixiv.net`**
+2. 复制 `PHPSESSID` 等键值，拼成形如 `PHPSESSID=xxxx; yuid_b=yyy` 的字符串
+3. 写进 `.env` 的 `PXREPO_COOKIE`（或用 `PXREPO_COOKIE_FILE` 指向导出的 JSON）
+4. 之后 `node cli.js -p <PID>` 会自动走网页会话路径（输出里会打印 `[会话] 使用网页会话 Cookie 下载`）
+
+> 为什么需要它：Pixiv 对**未登录请求隐藏 R-18 作品的图片地址**（`urls.original` 为 `null`，普通作品正常）。
+> Cookie 只用于 ajax 接口；图片 CDN 仍需 `Referer`（引擎已统一带上）。
+
+#### 方式三：无头浏览器自动登录（账号密码）
+
+```bash
+node test/pixiv-web-login.mjs
+```
+
+- 脚本用无头 Chromium 经代理打开登录页 → 填 `.env` 里的 `PXREPO_PIXIV_ID` / `PXREPO_PIXIV_PASSWORD` → 取会话 Cookie
+- 产物：`<状态目录>/web-session.json`（含 `PHPSESSID`，权限 `0600`），**不保存密码**
+- 前提：执行机器能访问 Pixiv（需配代理，见「代理与网络」）
+
+#### 方式四：手工提供 refresh_token
+
+旧版工具（如历史 `pxrepo`）的 `config/config.json` 里若有 `refresh_token`，直接粘到 `.env` 的 `PXREPO_REFRESH_TOKEN` 即可，无需重新授权。
 
 > 请求头按官方 Android 客户端伪装：`App-OS/App-OS-Version/App-Version/User-Agent`，并带 `X-Client-Time`（本地时间带时区偏移）与 `X-Client-Hash = md5(X-Client-Time + HASH_SECRET)`。
 

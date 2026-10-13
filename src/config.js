@@ -40,6 +40,10 @@ const DEFAULTS = Object.freeze({
   retries: 3,              // PXREPO_RETRIES      失败重试次数（指数退避）
   stateDir: '',            // PXREPO_STATE_DIR    状态文件目录（黑名单/任务清单/历史）；空=数据根下 .pxrepo
   blacklistFile: '',       // PXREPO_BLACKLIST    黑名单文件路径；空=<stateDir>/blacklist.json
+  pixivId: '',             // PXREPO_PIXIV_ID     网页会话登录账号（仅本机 .env，不入库）
+  pixivPassword: '',       // PXREPO_PIXIV_PASSWORD 网页会话登录密码（仅本机 .env，不入库）
+  cookie: '',              // PXREPO_COOKIE       网页会话 Cookie 原文（PHPSESSID=...）；也可只给 cookieFile
+  cookieFile: '',          // PXREPO_COOKIE_FILE  Cookie 文件（默认 <stateDir>/web-session.json）
 });
 
 /** 允许的进度条样式（与 src/util/progress.js 保持一致） */
@@ -149,6 +153,10 @@ function load(opts = {}) {
     retries: toInt(raw('PXREPO_RETRIES'), DEFAULTS.retries),
     stateDir: expandHome(raw('PXREPO_STATE_DIR') || ''),
     blacklistFile: expandHome(raw('PXREPO_BLACKLIST') || ''),
+    pixivId: raw('PXREPO_PIXIV_ID') || '',
+    pixivPassword: raw('PXREPO_PIXIV_PASSWORD') || '',
+    cookie: raw('PXREPO_COOKIE') || '',
+    cookieFile: expandHome(raw('PXREPO_COOKIE_FILE') || ''),
     // 元信息（不参与业务判断，仅用于日志/排查）
     _root: ROOT,
     _envFile: opts.envFile || ENV_FILE,
@@ -165,6 +173,8 @@ function load(opts = {}) {
   if (!config.stateDir) config.stateDir = path.join(config.dataRoot || ROOT, '.pxrepo');
   // 黑名单文件缺省：状态目录下的 blacklist.json（可用 PXREPO_BLACKLIST 指向别处）
   if (!config.blacklistFile) config.blacklistFile = path.join(config.stateDir, 'blacklist.json');
+  // 网页会话 Cookie 文件缺省：状态目录下的 web-session.json（登录脚本/浏览器导出都写这里）
+  if (!config.cookieFile) config.cookieFile = path.join(config.stateDir, 'web-session.json');
 
   return config;
 }

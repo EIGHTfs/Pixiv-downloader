@@ -14,6 +14,7 @@ const { PixivClient } = require('../pixiv/client.js');
 const { createProgressTracker, isTty } = require('../util/progress.js');
 const { stateFile, ensureStateDir, ensureDir, readJson, writeJsonAtomic } = require('../store/json.js');
 const { createBlacklistStore, createTaskListStore, createHistoryStore } = require('../store/stores.js');
+const { WebSessionClient, resolveCookie } = require('../pixiv/web.js');
 
 /**
  * 把键值写进 .env（保留原有注释与顺序；键已存在则替换该行，否则追加）
@@ -104,11 +105,18 @@ function createContext(flags) {
     tasks: createTaskListStore(stateFile(cfg, 'download.json')),
     history: createHistoryStore(stateFile(cfg, 'history.json')),
   };
+
+  // 网页会话（Cookie 认证）：配置了 PXREPO_COOKIE 或存在会话文件时启用
+  const cookieInfo = resolveCookie(cfg);
+  const web = cookieInfo.header ? new WebSessionClient({ http, cookie: cookieInfo.header }) : null;
+  if (web) console.log(`[会话] 已加载网页会话 Cookie（来源：${cookieInfo.source}）`);
+
   return {
     flags,
     cfg,
     http,
     pixiv,
+    web,
     stores,
     /** 造进度条（自动判断 TTY 与样式） */
     makeTracker: (totalFiles) => createProgressTracker(totalFiles, isTty(), cfg.progress),
