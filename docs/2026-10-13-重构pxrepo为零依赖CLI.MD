@@ -296,6 +296,7 @@ PKCE：code_verifier = base64url(randomBytes(32))
 | 2026-10-13 | Step 10 收尾之一：README 全面重写——特性表 / 架构与数据流 / 安装 / 快速开始 / 命令参考 / `.env` 全量说明 / **六个功能完整流程**（登录、拉关注、按清单下载、单文件续传、清理、拆分）/ 命名规则 / 代理与网络 / 测试清单 / 版本记录（v5.0.0）；按决策⑦**不再保留来源声明** | — |
 | 2026-10-13 | Step 10 收尾之二：本地目录改名 `Pixiv-downloader`；GitHub 仓库改名 `EIGHTfs/Pixiv-downloader` 并更新 remote；推送 `pxder-legacy`（旧 124 提交保底）+ `main` 显式 lease 强推（1bf8aaa → 222fc11） | 待固化：改名后 `--force-with-lease` 会因 tracking 引用过期报 stale info，需用 `--force-with-lease=main:<已知远端SHA>` |
 | 2026-10-13 | 黑名单做实（明确语义：下载时跳过这些作者）：新增 `PXREPO_BLACKLIST`（默认 `<stateDir>/blacklist.json`）；首次使用自动迁移旧 `config/blacklist.json`（**复制条目不删旧文件、不覆盖已存在目标、打印来源去向**）；两者皆无时播种默认项（跳过 pixiv 事务局 id=11）；下载命中黑名单**不发任何请求**；接口明确拒绝（PixivError）的作者自动拉黑并可 `-l` 移出；新增 `test/blacklist-check.mjs` **8 PASS**；全量 **113 PASS / 0 FAIL** | 待固化：用户数据迁移三原则（复制不删 / 不覆盖 / 迁移可见） |
+| 2026-10-13 | 发行整理：①删除 GitHub 遗留草稿 release（id=56236401，2021-12-31 创建、无 tag 无标题）→ releases 归零 ②README 删除「版本记录」表，改为「分支说明」 ③版本号 5.0.0 → **1.0.0**（`cli.js` 的 VERSION 为唯一来源，README 不再维护版本列表）；全量 **125 PASS / 0 FAIL**（10 脚本全跑，真实链路测试通过） | 待固化：零依赖项目的版本号唯一来源＝代码常量，文档不重复维护版本列表 |
 | 2026-10-13 | Step 4 完成（`lib/names.js` 命名净化 + `lib/store.js` JSON 原子读写），`test/store-names-check.mjs` **20 PASS**（含「损坏文件改名留档不删」「store 模块无删除类 API」两条针对旧 bug 的断言）；`config.js` 增 `stateDir`（PXREPO_STATE_DIR，默认数据根下 `.pxrepo`）| 待固化：状态文件三条纪律（不用 require 读可变 JSON / 绝不删用户文件 / 原子写） |
 
 ---

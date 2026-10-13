@@ -27,7 +27,7 @@
  *   -h, --help / -v, --version
  */
 
-const VERSION = '5.0.0'; // 零依赖项目无 package.json，版本号以本常量与 README 版本记录为准
+const VERSION = '1.0.0'; // 零依赖项目无 package.json，版本号以本常量为唯一来源（README 不再维护版本列表）
 
 const { createContext } = require('./src/cli/context.js');
 const commands = require('./src/cli/commands.js');

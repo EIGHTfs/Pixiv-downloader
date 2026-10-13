@@ -262,11 +262,7 @@ node test/run-all.mjs --list     # 列出脚本
 
 ---
 
-## 版本记录
-
-| 版本 | 日期 | 说明 |
-|---|---|---|
-| v5.0.0 | 2026-10-13 | **零依赖重写**：移除全部 npm 依赖（含 `package.json`/`package-lock.json`）与旧实现，改为分层 `src/`（cli/net/pixiv/download/store/util）；新增零依赖 SOCKS5 与 HTTPDNS、`.tmp` 断点续传、严格大小校验与 HTML 反爬识别、跨进程锁、原子状态写、三样式进度条、`--dryrun/--concurrency/--tps/--progress/--limit`；测试体系 9 个脚本 117 断言（含真实链路 SHA256 比对） |
+## 分支说明
 
 > 旧实现（含 124 个提交的历史）保存在 `pxder-legacy` 分支，默认分支只保留本次重构之后的演进。
 
