@@ -184,11 +184,16 @@ node cli.js -U --concurrency 3 --tps 1
 #### 方式三：无头浏览器自动登录（账号密码）
 
 ```bash
-node test/pixiv-web-login.mjs
+node test/pixiv-web-login.mjs                    # 用 .env 里的 PXREPO_PROXY
+node test/pixiv-web-login.mjs --proxies <候选文件>  # 多代理轮试（每行一个）
 ```
 
-- 脚本用无头 Chromium 经代理打开登录页 → 填 `.env` 里的 `PXREPO_PIXIV_ID` / `PXREPO_PIXIV_PASSWORD` → 取会话 Cookie
+- 脚本用无头 Chromium 打开登录页 → 填 `.env` 里的 `PXREPO_PIXIV_ID` / `PXREPO_PIXIV_PASSWORD` → 取会话 Cookie
 - 产物：`<状态目录>/web-session.json`（含 `PHPSESSID`，权限 `0600`），**不保存密码**
+- **出网方式（关键）**：实测 Chromium 直连 SOCKS5 报 `ERR_SOCKS_CONNECTION_FAILED`，而本项目自研 SOCKS5 能通；
+  因此脚本先起一个**本地 HTTP CONNECT 代理桥**（`src/net/socks-bridge.js`），让 Chromium 只面对本地 HTTP 代理
+- **多代理轮试（学习型）**：候选顺序 = 成功过的（GOOD，新→旧）→ 未失败过的 → 最近失败过的（排最后）；
+  结果持久化到 `<状态目录>/proxy-state.json`，失败项 30 分钟内不优先重试（过期自动解冻）
 - 前提：执行机器能访问 Pixiv（需配代理，见「代理与网络」）
 
 #### 方式四：手工提供 refresh_token
@@ -294,7 +299,10 @@ node test/run-all.mjs --list     # 列出脚本
 | `pixiv-api-check.mjs` | 鉴权头/PKCE/查询串；在线：未鉴权被 Pixiv 拒绝 |
 | `progress-check.mjs` | 三样式渲染、节流、非 TTY 静默、清区域 |
 | `store-names-check.mjs` | 命名净化与反解、原子写、损坏留档、黑名单/清单/历史 |
-| `probe-proxy.mjs` | 工具：批量探测代理可用性 |
+| `probe-proxy.mjs` | 工具：批量探测代理可用性（供轮试候选列表用） |
+| `socks-bridge-check.mjs` | 本地 HTTP 桥 → mock SOCKS5 → 本地目标：隧道可用性、405、上游不可达 502 |
+| `proxy-state-check.mjs` | 代理学习状态：GOOD 优先/新→旧、BAD 排最后、过期解冻、脏数据容错 |
+| `pixiv-web-check.mjs` | Cookie 登录：Cookie 头组装、来源优先级、网页形态 → 任务命名 |
 
 ---
 
